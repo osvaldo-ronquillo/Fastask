@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VozTask — Tu día, hablado</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  /* ===================================================
+     🔧 CONFIGURACIÓN — reemplaza con tus datos de Firebase
+     =================================================== */
+  const firebaseConfig = {
+    apiKey: "__FIREBASE_API_KEY__",
+    authDomain: "__FIREBASE_AUTH_DOMAIN__",
+    projectId: "__FIREBASE_PROJECT_ID__",
+    storageBucket: "__FIREBASE_STORAGE_BUCKET__",
+    messagingSenderId: "__FIREBASE_MESSAGING_SENDER_ID__",
+    appId: "__FIREBASE_APP_ID__"
+  };
+
+  /* ===================================================
+     🔧 GEMINI API KEY — reemplaza con tu clave
+     =================================================== */
+  const GEMINI_API_KEY = "__GEMINI_API_KEY__";
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const tasksCol = collection(db, "voztasks");
+
+  /* ---------- Estado ---------- */
+  let tasks = [];
+  let isListening = false;
+  let recognition = null;
+  let filterState = "todas";
+
+  /* ---------- Prioridad color map ---------- */
+  const prioColor = { alta: "#e05c4b", media: "#d4923a", baja: "#5a9e6f" };
+  const prioLabel = { alta: "Alta", media: "Media", baja: "Baja" };
+
+  /* ---------- Renderizado ---------- */
+  function todayStr() {
+    return new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+  }
+
+  function renderTasks() {
+    const list = document.getElementById("task-list");
+    const empty = document.getElementById("empty-state");
+    const filtered = tasks.filter(t => {
+      if (filterState === "pendientes") return !t.done;
+      if (filterState === "completadas") return t.done;
+      return true;
+    });
+
+    const pendingCount = tasks.filter(t => !t.done).length;
+    document.getElementById("pending-badge").textContent = pendingCount;
+    document.getElementById("total-badge").textContent = tasks.length;
+
+    if (filtered.length === 0) {
+      list.innerHTML = "";
+      empty.style.display = "flex";
+      return;
+    }
+    empty.style.display = "none";
+
+    list.innerHTML = filtered.map(t => `
+      <div class="task-card ${t.done ? "done" : ""}" data-id="${t.id}">
+        <button class="check-btn" onclick="toggleTask('${t.id}', ${t.done})" aria-label="${t.done ? "Marcar pendiente" : "Completar"}">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            ${t.done
+              ? `<circle cx="9" cy="9" r="8.5" fill="#5a9e6f" stroke="#5a9e6f"/>
+                 <path d="M5 9l3 3 5-5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`
+              : `<circle cx="9" cy="9" r="8.5" stroke="#c8c4bb"/>`
+            }
+          </svg>
+        </button>
+        <div class="task-body">
+          <span class="task-title">${t.title}</span>
+          <div class="task-meta">
+            ${t.time ? `<span class="meta-chip time-chip">⏰ ${t.time}</span>` : ""}
+            ${t.priority ? `<span class="meta-chip prio-chip" style="background:${prioColor[t.priority]}22;color:${prioColor[t.priority]}">● ${prioLabel[t.priority]}</span>` : ""}
+            ${t.context ? `<span class="meta-chip ctx-chip">${t.context}</span>` : ""}
+          </div>
+        </div>
+        <button class="delete-btn" onclick="deleteTask('${t.id}')" aria-label="Eliminar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    `).join("");
+  }
+
+  /* ---------- Firebase listeners ---------- */
+  const q = query(tasksCol, orderBy("createdAt", "asc"));
+  onSnapshot(q, snapshot => {
+    tasks = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderTasks();
+  });
+
+  /* ---------- Toggle / Delete ---------- */
+  window.toggleTask = async (id, done) => {
+    await updateDoc(doc(db, "voztasks", id), { done: !done });
+  };
+
+  window.deleteTask = async (id) => {
+    if (confirm("¿Eliminar esta tarea?")) {
+      await deleteDoc(doc(db, "voztasks", id));
+    }
+  };
+
+  /* ---------- Filtros ---------- */
+  window.setFilter = (f) => {
+    filterState = f;
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    document.querySelector(`[data-filter="${f}"]`).classList.add("active");
+    renderTasks();
+  };
+
+  /* ---------- Gemini: parsear voz → tarea ---------- */
+  async function parseWithGemini(transcript) {
+    const today = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const prompt = `Eres un asistente de gestión de tareas. El usuario dijo: "${transcript}".
+    
+Hoy es ${today}. Extrae la tarea y responde SOLO con JSON válido, sin backticks ni texto adicional, con esta estructura exacta:
+{
+  "action": "agregar" | "ignorar",
+  "title": "descripción clara de la tarea",
+  "time": "HH:MM" o null,
+  "priority": "alta" | "media" | "baja",
+  "context": "etiqueta de contexto breve" o null
+}
+
+Reglas:
+- Si el usuario dice guardar/agregar/añadir/recordar una tarea, action = "agregar"
+- Si solo hace una pregunta o charla, action = "ignorar"
+- title debe ser conciso pero claro
+- priority: infiere según palabras como urgente/importante/cuando puedas/etc. Default "media"
+- context: cliente, proyecto, personal, trabajo, etc. Solo si es evidente.`;
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2 }
+      })
+    });
+
+    const data = await res.json();
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const clean = raw.replace(/```json|```/g, "").trim();
+    return JSON.parse(clean);
+  }
+
+  /* ---------- Guardar tarea ---------- */
+  async function saveTask(parsed) {
+    await addDoc(tasksCol, {
+      title: parsed.title,
+      time: parsed.time || null,
+      priority: parsed.priority || "media",
+      context: parsed.context || null,
+      done: false,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  /* ---------- Reconocimiento de voz ---------- */
+  function initRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showFeedback("Tu navegador no soporta reconocimiento de voz. Usa Chrome.", "error");
+      return null;
+    }
+    const r = new SpeechRecognition();
+    r.lang = "es-MX";
+    r.continuous = false;
+    r.interimResults = true;
+
+    r.onstart = () => {
+      isListening = true;
+      updateMicUI(true);
+      showFeedback("Escuchando...", "listening");
+    };
+
+    r.onresult = (e) => {
+      const interim = Array.from(e.results).map(r => r[0].transcript).join("");
+      document.getElementById("transcript-preview").textContent = interim;
+    };
+
+    r.onerror = (e) => {
+      isListening = false;
+      updateMicUI(false);
+      showFeedback("Error al escuchar: " + e.error, "error");
+    };
+
+    r.onend = async () => {
+      isListening = false;
+      updateMicUI(false);
+      const text = document.getElementById("transcript-preview").textContent.trim();
+      if (!text) { showFeedback("No escuché nada. Intenta de nuevo.", "error"); return; }
+
+      showFeedback("Procesando con Gemini...", "processing");
+      try {
+        const parsed = await parseWithGemini(text);
+        if (parsed.action === "agregar") {
+          await saveTask(parsed);
+          showFeedback(`✓ Tarea guardada: "${parsed.title}"`, "success");
+        } else {
+          showFeedback("No detecté una tarea para guardar.", "info");
+        }
+      } catch (err) {
+        showFeedback("Error al procesar. ¿Configuraste las API keys?", "error");
+        console.error(err);
+      }
+      setTimeout(() => {
+        document.getElementById("transcript-preview").textContent = "";
+      }, 3000);
+    };
+
+    return r;
+  }
+
+  window.toggleMic = () => {
+    if (isListening) {
+      recognition?.stop();
+      return;
+    }
+    if (!recognition) recognition = initRecognition();
+    recognition?.start();
+  };
+
+  function updateMicUI(listening) {
+    const btn = document.getElementById("mic-btn");
+    const ring = document.getElementById("mic-ring");
+    btn.classList.toggle("listening", listening);
+    ring.classList.toggle("active", listening);
+  }
+
+  function showFeedback(msg, type) {
+    const fb = document.getElementById("feedback");
+    fb.textContent = msg;
+    fb.className = "feedback " + type;
+    fb.style.opacity = "1";
+    if (type === "success" || type === "info") {
+      setTimeout(() => { fb.style.opacity = "0"; }, 4000);
+    }
+  }
+
+  /* ---------- Tarea manual ---------- */
+  window.addManual = async () => {
+    const input = document.getElementById("manual-input");
+    const val = input.value.trim();
+    if (!val) return;
+    showFeedback("Procesando...", "processing");
+    try {
+      const parsed = await parseWithGemini("Guardar tarea: " + val);
+      if (parsed.action === "agregar") {
+        await saveTask(parsed);
+        showFeedback(`✓ "${parsed.title}" guardada.`, "success");
+        input.value = "";
+      }
+    } catch (e) {
+      showFeedback("Error al procesar.", "error");
+    }
+  };
+
+  window.onManualKey = (e) => { if (e.key === "Enter") window.addManual(); };
+</script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f3ee;
+    --surface: #ffffff;
+    --surface2: #f0ede6;
+    --ink: #1a1815;
+    --ink2: #6b6760;
+    --ink3: #a8a49e;
+    --accent: #c84b2f;
+    --accent2: #e8d5c4;
+    --border: #dedad3;
+    --radius: 14px;
+    --font-display: 'DM Serif Display', serif;
+    --font-body: 'Instrument Sans', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* --- Layout --- */
+  .app-wrap {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 5rem;
+  }
+
+  /* --- Header --- */
+  header {
+    margin-bottom: 2.5rem;
+  }
+
+  .date-line {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink3);
+    margin-bottom: 0.35rem;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-size: 2.4rem;
+    font-weight: 400;
+    line-height: 1.1;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
+
+  h1 em {
+    color: var(--accent);
+    font-style: italic;
+  }
+
+  .stats-row {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .stat-pill {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink2);
+    background: var(--surface2);
+    border: 0.5px solid var(--border);
+    border-radius: 100px;
+    padding: 4px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stat-pill strong {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* --- Mic Section --- */
+  .mic-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    padding: 2rem;
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .mic-section::before {
+    content: "";
+    position: absolute;
+    top: -40px;
+    right: -40px;
+    width: 160px;
+    height: 160px;
+    background: radial-gradient(circle, #c84b2f18 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .mic-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mic-ring {
+    position: absolute;
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent);
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity 0.3s, transform 0.3s;
+  }
+
+  .mic-ring.active {
+    opacity: 0.35;
+    transform: scale(1.15);
+    animation: pulse-ring 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { transform: scale(1.1); opacity: 0.35; }
+    50% { transform: scale(1.25); opacity: 0.15; }
+  }
+
+  #mic-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    position: relative;
+    z-index: 1;
+  }
+
+  #mic-btn:hover { background: var(--surface2); border-color: var(--ink3); }
+
+  #mic-btn.listening {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  #mic-btn.listening svg path { stroke: #fff; }
+
+  .mic-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink3);
+  }
+
+  #transcript-preview {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 1.05rem;
+    color: var(--ink2);
+    text-align: center;
+    min-height: 1.6rem;
+    max-width: 380px;
+  }
+
+  .feedback {
+    font-size: 13px;
+    font-family: var(--font-mono);
+    padding: 8px 16px;
+    border-radius: 100px;
+    transition: opacity 0.5s;
+    text-align: center;
+  }
+
+  .feedback.listening { background: #1a181510; color: var(--ink2); }
+  .feedback.processing { background: #d4923a18; color: #9e6a20; }
+  .feedback.success { background: #5a9e6f18; color: #3a7050; }
+  .feedback.error { background: #e05c4b18; color: #b03a2a; }
+  .feedback.info { background: var(--surface2); color: var(--ink2); }
+
+  /* --- Manual input --- */
+  .manual-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+
+  .manual-row input {
+    flex: 1;
+    padding: 9px 14px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .manual-row input:focus { border-color: var(--ink3); }
+  .manual-row input::placeholder { color: var(--ink3); }
+
+  .manual-row button {
+    padding: 9px 18px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--ink);
+    color: #fff;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+  }
+
+  .manual-row button:hover { opacity: 0.8; }
+
+  /* --- Filters --- */
+  .filters {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 1.25rem;
+  }
+
+  .filter-btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 5px 14px;
+    border: 0.5px solid var(--border);
+    border-radius: 100px;
+    background: transparent;
+    color: var(--ink3);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .filter-btn:hover { color: var(--ink2); border-color: var(--ink3); }
+
+  .filter-btn.active {
+    background: var(--ink);
+    color: #fff;
+    border-color: var(--ink);
+  }
+
+  /* --- Tasks --- */
+  #task-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .task-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    transition: opacity 0.2s, border-color 0.2s;
+    animation: slide-in 0.25s ease;
+  }
+
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .task-card:hover { border-color: var(--ink3); }
+  .task-card.done { opacity: 0.45; }
+  .task-card.done .task-title { text-decoration: line-through; }
+
+  .check-btn, .delete-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    border-radius: 50%;
+    transition: opacity 0.15s;
+  }
+
+  .delete-btn { color: var(--ink3); opacity: 0; margin-left: auto; }
+  .task-card:hover .delete-btn { opacity: 1; }
+  .delete-btn:hover { color: var(--accent); }
+
+  .task-body { flex: 1; min-width: 0; }
+
+  .task-title {
+    display: block;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 5px;
+    line-height: 1.3;
+  }
+
+  .task-meta { display: flex; flex-wrap: wrap; gap: 5px; }
+
+  .meta-chip {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 2px 9px;
+    border-radius: 100px;
+    letter-spacing: 0.03em;
+  }
+
+  .time-chip { background: var(--surface2); color: var(--ink2); border: 0.5px solid var(--border); }
+  .ctx-chip { background: #e8d5c426; color: #9a6a40; border: 0.5px solid #e8d5c4; }
+
+  /* --- Empty state --- */
+  #empty-state {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    padding: 4rem 2rem;
+    gap: 1rem;
+    text-align: center;
+  }
+
+  .empty-icon {
+    font-family: var(--font-display);
+    font-size: 3rem;
+    color: var(--ink3);
+    font-style: italic;
+  }
+
+  .empty-title {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    color: var(--ink2);
+    font-style: italic;
+  }
+
+  .empty-sub {
+    font-size: 13px;
+    color: var(--ink3);
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+  }
+
+  /* --- Section label --- */
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink3);
+    margin-bottom: 0.75rem;
+  }
+
+  /* --- Setup notice --- */
+  .setup-banner {
+    background: #d4923a12;
+    border: 0.5px solid #d4923a55;
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin-bottom: 1.5rem;
+    font-size: 13px;
+    color: #9e6a20;
+    font-family: var(--font-mono);
+    line-height: 1.6;
+  }
+
+  .setup-banner a { color: inherit; }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 1.9rem; }
+    .mic-section { padding: 1.5rem 1rem; }
+  }
+</style>
+</head>
+
+<body>
+<div class="app-wrap">
+
+  <!-- Header -->
+  <header>
+    <p class="date-line" id="date-line"></p>
+    <h1>Tu día,<br><em>hablado.</em></h1>
+    <div class="stats-row">
+      <span class="stat-pill"><strong id="pending-badge">0</strong> pendientes</span>
+      <span class="stat-pill"><strong id="total-badge">0</strong> totales hoy</span>
+    </div>
+  </header>
+
+  <!-- Mic section -->
+  <div class="mic-section">
+    <div class="mic-wrapper">
+      <div class="mic-ring" id="mic-ring"></div>
+      <button id="mic-btn" onclick="toggleMic()" aria-label="Activar micrófono">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M14 4a3.5 3.5 0 0 1 3.5 3.5v7a3.5 3.5 0 0 1-7 0v-7A3.5 3.5 0 0 1 14 4z" stroke="#1a1815" stroke-width="1.6"/>
+          <path d="M7 14.5A7 7 0 0 0 21 14.5" stroke="#1a1815" stroke-width="1.6" stroke-linecap="round"/>
+          <line x1="14" y1="21.5" x2="14" y2="25" stroke="#1a1815" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <p class="mic-label">Mantén y habla</p>
+
+    <p id="transcript-preview"></p>
+
+    <div id="feedback" class="feedback" style="opacity:0">—</div>
+
+    <div class="manual-row">
+      <input type="text" id="manual-input" placeholder="O escribe una tarea aquí..." onkeydown="onManualKey(event)">
+      <button onclick="addManual()">Guardar</button>
+    </div>
+  </div>
+
+  <!-- Task list -->
+  <p class="section-label">Tareas de hoy</p>
+
+  <div class="filters">
+    <button class="filter-btn active" data-filter="todas" onclick="setFilter('todas')">Todas</button>
+    <button class="filter-btn" data-filter="pendientes" onclick="setFilter('pendientes')">Pendientes</button>
+    <button class="filter-btn" data-filter="completadas" onclick="setFilter('completadas')">Completadas</button>
+  </div>
+
+  <div id="task-list"></div>
+
+  <div id="empty-state">
+    <span class="empty-icon">✦</span>
+    <p class="empty-title">Sin tareas aún.</p>
+    <p class="empty-sub">Presiona el micrófono y dile qué tienes que hacer hoy.</p>
+  </div>
+
+</div>
+
+<script>
+  document.getElementById("date-line").textContent = new Date().toLocaleDateString("es-MX", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric"
+  }).replace(/^\w/, c => c.toUpperCase());
+</script>
+</body>
+</html>

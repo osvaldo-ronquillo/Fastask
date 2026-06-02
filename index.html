@@ -427,7 +427,7 @@ window.addManual=async()=>{
   }catch(e){ showFeedback("Error al procesar","error"); }
 };
 
-window.onManualKey=e=>{ if(e.key===="Enter") window.addManual(); };
+window.onManualKey=e=>{ if(e.key==="Enter") window.addManual(); };
 
 window.onInputChange=()=>{
   const hasText = document.getElementById("manual-input").value.trim().length > 0;

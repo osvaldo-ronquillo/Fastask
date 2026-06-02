@@ -126,37 +126,25 @@
   /* ---------- Gemini: parsear voz → tarea ---------- */
   async function parseWithGemini(transcript) {
     const today = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-    const prompt = `Eres un asistente de gestión de tareas. El usuario dijo: "${transcript}".
-    
-Hoy es ${today}. Extrae la tarea y responde SOLO con JSON válido, sin backticks ni texto adicional, con esta estructura exacta:
-{
-  "action": "agregar" | "ignorar",
-  "title": "descripción clara de la tarea",
-  "time": "HH:MM" o null,
-  "priority": "alta" | "media" | "baja",
-  "context": "etiqueta de contexto breve" o null
-}
+    const prompt = `Eres un asistente de gestion de tareas. El usuario dijo: "${transcript}". Hoy es ${today}. Extrae la tarea y responde con este JSON exacto: {"action": "agregar" o "ignorar", "title": "descripcion de la tarea", "time": "HH:MM" o null, "priority": "alta" o "media" o "baja", "context": "etiqueta" o null}. Si el usuario quiere guardar/agregar/recordar una tarea, action=agregar. Si solo conversa, action=ignorar.`;
 
-Reglas:
-- Si el usuario dice guardar/agregar/añadir/recordar una tarea, action = "agregar"
-- Si solo hace una pregunta o charla, action = "ignorar"
-- title debe ser conciso pero claro
-- priority: infiere según palabras como urgente/importante/cuando puedas/etc. Default "media"
-- context: cliente, proyecto, personal, trabajo, etc. Solo si es evidente.`;
-
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2 }
+        generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
       })
     });
 
     const data = await res.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const clean = raw.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
+    try {
+      const rawData = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      return JSON.parse(rawData);
+    } catch (error) {
+      console.error("Error al parsear JSON de Gemini:", error);
+      return { action: "ignorar" };
+    }
   }
 
   /* ---------- Guardar tarea ---------- */

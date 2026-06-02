@@ -140,6 +140,8 @@
     const data = await res.json();
     try {
       const rawData = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      console.log("Respuesta Gemini:", rawData);
+console.log("Data completa:", JSON.stringify(data));
       return JSON.parse(rawData);
     } catch (error) {
       console.error("Error al parsear JSON de Gemini:", error);

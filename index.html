@@ -56,6 +56,10 @@ onAuthStateChanged(auth, async user => {
 function showApp(){
   document.getElementById("auth-screen").style.display = "none";
   document.getElementById("app-main").style.display = "grid";
+  
+  // INICIAMOS LOS LISTENERS AQUÍ PORQUE EL USUARIO YA ESTÁ VALIDADO
+  startListeners();
+  
   setTimeout(()=>{ if(typeof renderCalendar==="function") renderCalendar(); }, 150);
 }
 
@@ -91,10 +95,10 @@ let dragSrcId = null;
 let searchQuery = "";
 
 const CATEGORIES = [
-  { id:"freelance",    label:"Freelance",    icon:"https://img.icons8.com/forma-light/24/FFFFFF/ninja-head.png" },
-  { id:"trabajo",      label:"Trabajo",      icon:"https://img.icons8.com/forma-light/24/FFFFFF/briefcase.png" },
-  { id:"universidad",  label:"Universidad",  icon:"https://img.icons8.com/forma-light/24/FFFFFF/student-male.png" },
-  { id:"personal",     label:"Personal",     icon:"https://img.icons8.com/forma-light/24/FFFFFF/launched-rocket.png" },
+  { id:"freelance",   label:"Freelance",   icon:"https://img.icons8.com/forma-light/24/FFFFFF/ninja-head.png" },
+  { id:"trabajo",     label:"Trabajo",     icon:"https://img.icons8.com/forma-light/24/FFFFFF/briefcase.png" },
+  { id:"universidad", label:"Universidad", icon:"https://img.icons8.com/forma-light/24/FFFFFF/student-male.png" },
+  { id:"personal",    label:"Personal",    icon:"https://img.icons8.com/forma-light/24/FFFFFF/launched-rocket.png" },
 ];
 const PRIORITIES = [
   { id:"normal",  label:"Normal",  color:"#7B8EE8" },
@@ -201,11 +205,13 @@ document.querySelectorAll(".kanban-col").forEach(col=>{
 });
 
 /* ---- Firebase listeners ---- */
-const q = query(tasksCol, orderBy("createdAt","asc"));
-onSnapshot(q, snap=>{ tasks=snap.docs.map(d=>({id:d.id,...d.data()})); renderAll(); });
+function startListeners() {
+  const q = query(tasksCol, orderBy("createdAt","asc"));
+  onSnapshot(q, snap=>{ tasks=snap.docs.map(d=>({id:d.id,...d.data()})); renderAll(); });
 
-const qn = query(notesCol, orderBy("createdAt","desc"));
-onSnapshot(qn, snap=>{ notes=snap.docs.map(d=>({id:d.id,...d.data()})); renderNotes(); });
+  const qn = query(notesCol, orderBy("createdAt","desc"));
+  onSnapshot(qn, snap=>{ notes=snap.docs.map(d=>({id:d.id,...d.data()})); renderNotes(); });
+}
 
 window.deleteTask = async id=>{ if(confirm("¿Eliminar?")) await deleteDoc(doc(db,"voztasks",id)); };
 window.toggleStatus = async (id,cur)=>{ await updateDoc(doc(db,"voztasks",id),{status:cur==="inprogress"?"todo":"inprogress"}); };
@@ -817,7 +823,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 <body>
 
 <div id="sidebar-backdrop" class="sidebar-backdrop" onclick="toggleSidebar()"></div>
-<!-- AUTH SCREEN -->
 <div id="auth-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg)">
   <div style="display:flex;flex-direction:column;align-items:center;gap:20px;padding:40px;background:var(--surface);border:1px solid var(--border);border-radius:20px;min-width:300px">
     <img src="https://raw.githubusercontent.com/osvaldo-ronquillo/Fastask/main/img/fastask.png?v=202606020748" style="height:36px">
@@ -829,10 +834,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   </div>
 </div>
 
-<!-- APP -->
 <div class="app" id="app-main" style="display:none">
 
-  <!-- TOPBAR -->
   <header class="topbar">
     <button class="mobile-btn" onclick="toggleSidebar()">☰</button>
     <img src="https://raw.githubusercontent.com/osvaldo-ronquillo/Fastask/main/img/fastask.png?v=202606020748" class="logo" alt="Fastask">
@@ -844,7 +847,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     <button class="mobile-btn mobile-right-btn" onclick="toggleRightPanel()" title="Planeador / Notas"><i class="fi fi-rr-calendar-check"></i></button>
   </header>
 
-  <!-- SIDEBAR -->
   <aside id="sidebar"><button class="sidebar-close" onclick="toggleSidebar()">×</button>
     <div class="sidebar-section">
       <p class="sidebar-label">Categorías</p>
@@ -861,7 +863,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     </div>
   </aside>
 
-  <!-- MAIN KANBAN -->
   <main class="main">
     <div class="kanban-wrap">
       <div class="col-wrap">
@@ -875,7 +876,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     </div>
   </main>
 
-  <!-- FLOATING INPUT BAR -->
   <div class="float-bar">
     <div class="float-input-wrap">
       <input type="text" id="manual-input" placeholder="Escribe o dicta una tarea…" onkeydown="onManualKey(event)" oninput="onInputChange()">
@@ -897,14 +897,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     <div id="feedback" class="feedback" style="opacity:0">—</div>
   </div>
 
-  <!-- RIGHT PANEL -->
   <aside class="right-panel" id="right-panel">
     <div class="right-tabs">
       <button class="rtab active" onclick="switchTab('cal')"><i class="fi fi-rr-calendar-check"></i> Planeador</button>
       <button class="rtab" onclick="switchTab('notes')"><i class="fi fi-rr-pen-field"></i> Notas</button>
     </div>
 
-    <!-- Calendar tab -->
     <div class="right-tab-content visible" id="tab-cal">
       <div class="cal-nav-row">
         <button class="cal-nav-btn" onclick="calPrev()">‹</button>
@@ -918,7 +916,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
       </div>
     </div>
 
-    <!-- Notes tab -->
     <div class="right-tab-content" id="tab-notes">
       <div class="note-new">
         <input type="text" id="note-title" placeholder="Título (opcional)">
@@ -930,7 +927,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   </aside>
 </div>
 
-<!-- MODAL -->
 <div id="modal-overlay">
   <div class="modal">
     <div id="modal-content"></div>
@@ -974,6 +970,5 @@ setTimeout(()=>{
   });
 },500);
 </script>
-</div><!-- /app-main -->
-</body>
+</div></body>
 </html>

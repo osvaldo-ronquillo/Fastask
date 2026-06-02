@@ -150,26 +150,39 @@ function filteredTasks(){
 
 function taskCard(t){
   const prio = PRIORITIES.find(p=>p.id===t.priority)||PRIORITIES[0];
-  const cat = catObj(t.category);
   const dl = t.deadline ? new Date(t.deadline+"T12:00:00").toLocaleDateString("es-MX",{day:"numeric",month:"short"}) : "";
+  
   return `
   <div class="task-card" data-id="${t.id}" draggable="true">
     <div class="card-header">
       <span class="card-title" onclick="startEditTitle('${t.id}')" title="Click para editar">${t.title}</span>
       <button class="card-delete" onclick="deleteTask('${t.id}')">×</button>
     </div>
+    
     <div class="card-chips">
-      ${cat?`<span class="chip cat-chip"><img src="${cat.icon.replace('/forma-light/24/', '/forma-light/24/FFFFFF/')}" width="11" height="11"> ${cat.label}</span>`:""}
-      <span class="chip prio-chip" style="--pc:${prio.color}">${prio.label}</span>
+      <!-- SELECT DE CATEGORÍA -->
+      <select class="chip cat-chip chip-select" onchange="updateTaskField('${t.id}', 'category', this.value)">
+        <option value="freelance" ${t.category==='freelance'?'selected':''}>Freelance</option>
+        <option value="trabajo" ${t.category==='trabajo'?'selected':''}>Trabajo</option>
+        <option value="universidad" ${t.category==='universidad'?'selected':''}>Universidad</option>
+        <option value="personal" ${t.category==='personal'?'selected':''}>Personal</option>
+      </select>
+
+      <!-- SELECT DE PRIORIDAD -->
+      <select class="chip prio-chip chip-select" style="--pc:${prio.color}" onchange="updateTaskField('${t.id}', 'priority', this.value)">
+        <option value="normal" ${t.priority==='normal'?'selected':''}>Normal</option>
+        <option value="alta" ${t.priority==='alta'?'selected':''}>Alta</option>
+        <option value="urgente" ${t.priority==='urgente'?'selected':''}>Urgente</option>
+      </select>
+
       ${t.time?`<span class="chip time-chip"><i class="fi fi-rr-clock"></i> ${t.time}</span>`:""}
       ${dl?`<span class="chip dl-chip"><i class="fi fi-rr-calendar-check"></i> ${dl}</span>`:""}
     </div>
+    
     ${t.context?`<p class="card-context">${t.context}</p>`:""}
     ${t.link?`<a class="card-link" href="${t.link}" target="_blank" rel="noopener">🔗 ${t.link.replace(/^https?:\/\//,"").slice(0,42)}${t.link.length>50?"…":""}</a>`:""}
+    
     <div class="card-actions">
-      <!-- NUEVO BOTÓN DE PRIORIDAD -->
-      <button class="ca-btn" onclick="openPriorityModal('${t.id}')" title="Prioridad"><i class="fi fi-rr-flag"></i></button>
-      
       <button class="ca-btn" onclick="openDeadlineModal('${t.id}')" title="Deadline"><i class="fi fi-rr-calendar-check"></i></button>
       <button class="ca-btn" onclick="openLinkModal('${t.id}')" title="Enlace"><i class="fi fi-rr-link-alt"></i></button>
       <button class="ca-btn" onclick="openContextModal('${t.id}')" title="Contexto"><i class="fi fi-rr-message-text"></i></button>
@@ -177,6 +190,11 @@ function taskCard(t){
     </div>
   </div>`;
 }
+
+// NUEVA FUNCIÓN: Sirve para que los Selects de arriba actualicen Firestore en tiempo real
+window.updateTaskField = async (id, field, value) => {
+  await updateDoc(doc(db, "voztasks", id), { [field]: value });
+};
 
 function renderKanban(){
   const ft = filteredTasks();
@@ -397,24 +415,25 @@ window.deleteNote=async id=>{ if(confirm("¿Eliminar nota?")) await deleteDoc(do
 
 /* ---- Voice ---- */
 async function parseTask(transcript){
-  const today=new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
-  const res=await fetch("https://gemini-proxy.osvaldo-ronquillo.workers.dev/",{
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({transcript,today})
+  const today = new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  const res = await fetch("https://gemini-proxy.osvaldo-ronquillo.workers.dev/",{
+    method: "POST", 
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript, today })
   });
-  const data=await res.json();
-  if(typeof data==="object"&&data.action) return data;
-  return JSON.parse(data);
+  
+  return await res.json(); // Retorna directamente la lista de tareas procesada
 }
 
 async function saveTask(parsed){
-  const catGuess = guessCategory(parsed.context||"");
+  const catGuess = parsed.category || guessCategory(parsed.context||parsed.title||"");
   await addDoc(tasksCol,{
     title:parsed.title,
     time:parsed.time||null,
     priority:parsed.priority==="media"?"normal":(parsed.priority||"normal"),
     category:catGuess,
-    context:null, link:null, deadline:null,
+    context:null, link:null, 
+    deadline: parsed.deadline || null, // AHORA SÍ GUARDAMOS EL DEADLINE
     status:"todo", done:false,
     createdAt:new Date().toISOString()
   });
@@ -467,14 +486,34 @@ function showFeedback(msg,type){
   if(["success","info"].includes(type)) setTimeout(()=>{ fb.style.opacity="0"; },4000);
 }
 
-window.addManual=async()=>{
-  const input=document.getElementById("manual-input");
-  const val=input.value.trim(); if(!val) return;
-  showFeedback("Procesando…","processing");
-  try{
-    const parsed=await parseTask("Guardar tarea: "+val);
-    if(parsed.action==="agregar"){ await saveTask(parsed); showFeedback(`✓ "${parsed.title}"`,"success"); input.value=""; }
-  }catch(e){ showFeedback("Error al procesar","error"); }
+window.addManual = async () => {
+  const input = document.getElementById("manual-input");
+  const val = input.value.trim(); if (!val) return;
+  showFeedback("Procesando…", "processing");
+  try {
+    const parsed = await parseTask(val);
+    
+    // Convertimos la respuesta en Array por si la IA devuelve varias
+    const tasksArray = Array.isArray(parsed) ? parsed : [parsed];
+    let guardadas = 0;
+
+    for (const p of tasksArray) {
+      if (p.action === "agregar" || p.title) {
+        await saveTask(p);
+        guardadas++;
+      }
+    }
+
+    if (guardadas > 0) {
+      showFeedback(`✓ ${guardadas} tarea(s)`, "success");
+      input.value = "";
+    } else {
+      showFeedback("No detecté tarea", "info");
+    }
+  } catch (e) {
+    showFeedback("Error al procesar", "error");
+    console.error(e);
+  }
 };
 
 window.onManualKey=e=>{ if(e.key==="Enter") window.addManual(); };
@@ -870,6 +909,19 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   }
   .right-panel.open{max-height:50vh;overflow-y:auto}
   .mobile-right-btn{display:flex !important}
+}
+  select.chip-select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  outline: none;
+  text-align: center;
+}
+select.chip-select option {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 13px;
 }
 </style>
 </head>

@@ -157,8 +157,8 @@ function taskCard(t){
     <div class="card-chips">
       ${cat?`<span class="chip cat-chip"><img src="${cat.icon.replace('/forma-light/24/', '/forma-light/24/FFFFFF/')}" width="11" height="11"> ${cat.label}</span>`:""}
       <span class="chip prio-chip" style="--pc:${prio.color}">${prio.label}</span>
-      ${t.time?`<span class="chip time-chip">⏰ ${t.time}</span>`:""}
-      ${dl?`<span class="chip dl-chip">📅 ${dl}</span>`:""}
+      ${t.time?`<span class="chip time-chip"><i class="fi fi-rr-clock"></i> ${t.time}</span>`:""}
+      ${dl?`<span class="chip dl-chip"><i class="fi fi-rr-calendar-check"></i> ${dl}</span>`:""}
     </div>
     ${t.context?`<p class="card-context">${t.context}</p>`:""}
     ${t.link?`<a class="card-link" href="${t.link}" target="_blank" rel="noopener">🔗 ${t.link.replace(/^https?:\/\//,"").slice(0,42)}${t.link.length>50?"…":""}</a>`:""}

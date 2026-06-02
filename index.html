@@ -14,7 +14,7 @@
   import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   /* ===================================================
-      CONFIGURACIÓN — reemplaza con tus datos de Firebase
+     🔧 CONFIGURACIÓN — reemplaza con tus datos de Firebase
      =================================================== */
   const firebaseConfig = {
     apiKey: "AIzaSyD2WT0lxJ_qrkwF5V04PyFkuYFMEagENuU",
@@ -144,7 +144,7 @@ Reglas:
 - priority: infiere según palabras como urgente/importante/cuando puedas/etc. Default "media"
 - context: cliente, proyecto, personal, trabajo, etc. Solo si es evidente.`;
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

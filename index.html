@@ -607,10 +607,26 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 
 .card-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
 .chip{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:100px;display:flex;align-items:center;gap:3px}
-.cat-chip{background:var(--surface3);color:var(--ink2)}
-.prio-chip{background:color-mix(in srgb,var(--pc) 18%,transparent);color:var(--pc);border:1px solid color-mix(in srgb,var(--pc) 30%,transparent)}
-.time-chip{background:rgba(46,131,242,.15);color:var(--accent3)}
-.dl-chip{background:rgba(198,134,209,.15);color:var(--accent2)}
+.cat-chip {
+  background: color-mix(in srgb, var(--ink2) 15%, transparent);
+  color: var(--ink2);
+  border: 1px solid color-mix(in srgb, var(--ink2) 30%, transparent);
+}
+.prio-chip {
+  background: color-mix(in srgb, var(--pc) 18%, transparent);
+  color: var(--pc);
+  border: 1px solid color-mix(in srgb, var(--pc) 30%, transparent);
+}
+.time-chip {
+  background: rgba(46,131,242,.15);
+  color: var(--accent3);
+  border: 1px solid rgba(46,131,242,.3);
+}
+.dl-chip {
+  background: rgba(198,134,209,.15);
+  color: var(--accent2);
+  border: 1px solid rgba(198,134,209,.3);
+}
 
 .card-context{font-size:11px;color:var(--ink2);line-height:1.5;margin-bottom:6px}
 .card-link{font-size:11px;color:var(--accent3);text-decoration:none;display:block;margin-bottom:6px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

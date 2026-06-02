@@ -70,9 +70,22 @@ function showAuthScreen(){
 
 const signInGoogle = async () => {
   const btn = document.getElementById("google-signin-btn");
-  btn.textContent = "Redirigiendo...";
+  btn.textContent = "Iniciando...";
   btn.disabled = true;
-  await signInWithRedirect(auth, provider);
+  
+  try {
+    // Usamos Popup en lugar de Redirect
+    await signInWithPopup(auth, provider);
+    
+    // No necesitas llamar a showApp() aquí porque tu 
+    // onAuthStateChanged detectará automáticamente la sesión y lo hará.
+    
+  } catch (error) {
+    console.error("Error de autenticación:", error);
+    btn.textContent = "Entrar con Google";
+    btn.disabled = false;
+    // Opcional: mostrar un feedback al usuario si cierra la ventana
+  }
 };
 
 // Attach sign in button listener

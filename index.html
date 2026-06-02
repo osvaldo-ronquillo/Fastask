@@ -31,17 +31,24 @@ const tasksCol = collection(db, "voztasks");
 const notesCol = collection(db, "fastask_notes");
 
 /* ---- Auth ---- */
-setPersistence(auth, browserLocalPersistence);
+let appReady = false;
 
-// Handle redirect result first (for mobile/blocked popup fallback)
-getRedirectResult(auth).then(result => {
-  if(result?.user) showApp();
-}).catch(e => console.error("Redirect result error:", e));
-
-onAuthStateChanged(auth, user => {
-  if(user) {
+onAuthStateChanged(auth, async user => {
+  if(appReady) return; // prevent loops
+  if(user && !user.isAnonymous) {
+    appReady = true;
     showApp();
   } else {
+    if(user?.isAnonymous) await auth.signOut();
+    // Check if returning from redirect
+    try {
+      const result = await getRedirectResult(auth);
+      if(result?.user && !result.user.isAnonymous) {
+        appReady = true;
+        showApp();
+        return;
+      }
+    } catch(e) { console.error("Redirect error:", e); }
     showAuthScreen();
   }
 });

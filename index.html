@@ -163,6 +163,9 @@ function taskCard(t){
     ${t.context?`<p class="card-context">${t.context}</p>`:""}
     ${t.link?`<a class="card-link" href="${t.link}" target="_blank" rel="noopener">🔗 ${t.link.replace(/^https?:\/\//,"").slice(0,42)}${t.link.length>50?"…":""}</a>`:""}
     <div class="card-actions">
+      <!-- NUEVO BOTÓN DE PRIORIDAD -->
+      <button class="ca-btn" onclick="openPriorityModal('${t.id}')" title="Prioridad"><i class="fi fi-rr-flag"></i></button>
+      
       <button class="ca-btn" onclick="openDeadlineModal('${t.id}')" title="Deadline"><i class="fi fi-rr-calendar-check"></i></button>
       <button class="ca-btn" onclick="openLinkModal('${t.id}')" title="Enlace"><i class="fi fi-rr-link-alt"></i></button>
       <button class="ca-btn" onclick="openContextModal('${t.id}')" title="Contexto"><i class="fi fi-rr-message-text"></i></button>
@@ -239,6 +242,23 @@ function openModal(html, onSave){
 function closeModal(){ document.getElementById("modal-overlay").classList.remove("open"); }
 window.closeModal = closeModal;
 
+window.openPriorityModal = (id) => {
+  const t = tasks.find(x => x.id === id);
+  const p = t?.priority || "normal";
+  openModal(`
+    <h3 class="modal-title">Cambiar prioridad</h3>
+    <select id="modal-prio" class="modal-input">
+      <option value="normal" ${p==="normal"?"selected":""}>Normal</option>
+      <option value="alta" ${p==="alta"?"selected":""}>Alta</option>
+      <option value="urgente" ${p==="urgente"?"selected":""}>Urgente</option>
+    </select>
+  `, async () => {
+    const newPrio = document.getElementById("modal-prio").value;
+    await updateDoc(doc(db, "voztasks", id), { priority: newPrio });
+    closeModal();
+  });
+};  
+  
 window.openDeadlineModal = (id)=>{
   const t = tasks.find(x=>x.id===id);
   const val = t?.deadline||"";

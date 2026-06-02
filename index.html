@@ -126,25 +126,19 @@
   /* ---------- Gemini: parsear voz → tarea ---------- */
   async function parseWithGemini(transcript) {
     const today = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-    const prompt = `Eres un asistente de gestion de tareas en español. El usuario dijo: "${transcript}". Hoy es ${today}. Tu trabajo es detectar si el usuario menciona algo que tiene que hacer, ir a algun lugar, llamar a alguien, comprar algo, o cualquier actividad pendiente — aunque no diga explicitamente "guardar" o "agregar". Si hay una tarea implicita, action="agregar". Solo usa action="ignorar" si es una pregunta generica o conversacion sin ninguna actividad pendiente. Responde con este JSON exacto: {"action": "agregar" o "ignorar", "title": "descripcion clara de la tarea en infinitivo", "time": "HH:MM" o null, "priority": "alta" o "media" o "baja", "context": "etiqueta corta" o null}.`;
 
     const res = await fetch("https://gemini-proxy.osvaldo-ronquillo.workers.dev/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
-      })
+      body: JSON.stringify({ transcript, today })
     });
 
     const data = await res.json();
     try {
-      const rawData = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-      console.log("Respuesta Gemini:", rawData);
-console.log("Data completa:", JSON.stringify(data));
-      return JSON.parse(rawData);
+      if (typeof data === "object" && data.action) return data;
+      return JSON.parse(data);
     } catch (error) {
-      console.error("Error al parsear JSON de Gemini:", error);
+      console.error("Error al parsear respuesta:", error);
       return { action: "ignorar" };
     }
   }

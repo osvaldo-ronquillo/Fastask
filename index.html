@@ -691,65 +691,85 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 /* sidebar close btn */
 .sidebar-close{display:none;position:absolute;top:12px;right:12px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink2);font-size:18px;cursor:pointer;padding:2px 10px;line-height:1}
 
+/* sidebar close btn */
+.sidebar-close{display:none;position:absolute;top:12px;right:12px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--ink2);font-size:18px;cursor:pointer;padding:2px 10px;line-height:1}
+
 /* === MOBILE === */
 @media(max-width:900px){
+  /* Full flex column layout */
   .app{
-    display:flex;flex-direction:column;
-    height:100dvh;overflow:hidden;
+    display:flex !important;
+    flex-direction:column;
+    height:100dvh;
+    overflow:hidden;
   }
-  .mobile-btn{display:flex}
-  .topbar{flex-shrink:0}
 
-  /* Sidebar overlay */
+  .mobile-btn{display:flex !important}
+  .topbar{flex-shrink:0;padding:0 12px}
+  .search-wrap{max-width:none;flex:1}
+
+  /* Sidebar — full height overlay */
   #sidebar{
-    position:fixed;left:-100%;top:0;bottom:0;z-index:200;width:260px;
-    transition:left .3s;box-shadow:none;
+    position:fixed;
+    left:-100%;top:0;bottom:0;
+    z-index:300;
+    width:260px;
+    transition:left .3s ease;
     grid-column:unset;grid-row:unset;
   }
-  #sidebar.open{left:0;box-shadow:8px 0 40px rgba(0,0,0,.6)}
+  #sidebar.open{left:0;box-shadow:8px 0 40px rgba(0,0,0,.7)}
   .sidebar-close{display:block}
 
-  /* Sidebar overlay backdrop */
-  #sidebar.open::before{
-    content:"";position:fixed;left:260px;top:0;right:0;bottom:0;
-    background:rgba(0,0,0,.4);z-index:-1;
+  /* Backdrop when sidebar open */
+  .sidebar-backdrop{
+    display:none;
+    position:fixed;inset:0;
+    background:rgba(0,0,0,.5);
+    z-index:299;
   }
+  .sidebar-backdrop.visible{display:block}
 
-  /* Main kanban takes available space */
+  /* Main — flex:1 to fill space between topbar and float-bar */
   .main{
-    flex:1;overflow:hidden;
-    padding:10px 10px 0;
+    flex:1;
     min-height:0;
-  }
-  .kanban-wrap{grid-template-columns:1fr;height:100%}
-
-  /* Floating bar always visible at bottom */
-  .float-bar{
-    flex-shrink:0;
-    position:relative;
-    z-index:10;
+    overflow:hidden;
+    padding:10px;
     grid-column:unset;grid-row:unset;
   }
 
-  /* Right panel as bottom sheet tabs */
-  .right-panel{
-    display:flex;flex-direction:column;
-    flex-shrink:0;
-    max-height:0;overflow:hidden;
-    transition:max-height .35s ease;
-    border-left:none;border-top:1px solid var(--border);
+  /* Single column kanban */
+  .kanban-wrap{
+    grid-template-columns:1fr;
+    height:100%;
+    overflow-y:auto;
   }
-  .right-panel.open{max-height:55vh}
 
-  /* Mobile right panel toggle button */
-  .mobile-right-btn{display:flex}
+  /* Float bar always at bottom */
+  .float-bar{
+    flex-shrink:0;
+    grid-column:unset;grid-row:unset;
+    padding:10px 12px;
+  }
 
-  .search-wrap{max-width:none}
+  /* Right panel — collapsible above float bar */
+  .right-panel{
+    flex-shrink:0;
+    grid-column:unset;grid-row:unset;
+    border-left:none;
+    border-top:1px solid var(--border);
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .35s ease;
+  }
+  .right-panel.open{max-height:50vh;overflow-y:auto}
+  .mobile-right-btn{display:flex !important}
 }
 </style>
 </head>
 <body>
 
+<div id="sidebar-backdrop" class="sidebar-backdrop" onclick="toggleSidebar()"></div>
 <!-- AUTH SCREEN -->
 <div id="auth-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg)">
   <div style="display:flex;flex-direction:column;align-items:center;gap:20px;padding:40px;background:var(--surface);border:1px solid var(--border);border-radius:20px;min-width:300px">

@@ -128,7 +128,7 @@
     const today = new Date().toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
     const prompt = `Eres un asistente de gestion de tareas en español. El usuario dijo: "${transcript}". Hoy es ${today}. Tu trabajo es detectar si el usuario menciona algo que tiene que hacer, ir a algun lugar, llamar a alguien, comprar algo, o cualquier actividad pendiente — aunque no diga explicitamente "guardar" o "agregar". Si hay una tarea implicita, action="agregar". Solo usa action="ignorar" si es una pregunta generica o conversacion sin ninguna actividad pendiente. Responde con este JSON exacto: {"action": "agregar" o "ignorar", "title": "descripcion clara de la tarea en infinitivo", "time": "HH:MM" o null, "priority": "alta" o "media" o "baja", "context": "etiqueta corta" o null}.`;
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const res = await fetch("https://gemini-proxy.osvaldo-ronquillo.workers.dev/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

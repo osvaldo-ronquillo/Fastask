@@ -11,7 +11,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const firebaseConfig = {
@@ -25,6 +25,15 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+// --- NUEVO: Activar modo offline y resistencia a cortes de red ---
+enableIndexedDbPersistence(db).catch((err) => {
+  if (err.code == 'failed-precondition') {
+    console.log("Solo se puede tener una pestaña abierta para el modo offline.");
+  } else if (err.code == 'unimplemented') {
+    console.log("El navegador no soporta el modo offline de Firestore.");
+  }
+});
+// -----------------------------------------------------------------
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 const tasksCol = collection(db, "voztasks");

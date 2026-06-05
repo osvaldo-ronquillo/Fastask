@@ -31,7 +31,6 @@ const provider = new GoogleAuthProvider();
 const tasksCol = collection(db, "voztasks");
 const notesCol = collection(db, "fastask_notes");
 
-/* ---- Tema Inicial ---- */
 if(localStorage.getItem('theme') === 'light') document.documentElement.setAttribute('data-theme', 'light');
 
 /* ---- Auth ---- */
@@ -69,6 +68,7 @@ window.signInGoogle = async () => {
 
 /* ---- State ---- */
 let tasks = [], notes = [];
+let isListening = false, recognition = null;
 let activeCategory = null, activePriority = null, searchQuery = "";
 let currentMonth = new Date();
 let dragSrcId = null;
@@ -87,7 +87,8 @@ function varValue(v, fallback) { return getComputedStyle(document.documentElemen
 function renderAll(){ renderKanban(); renderCalendar(); renderNotes(); renderBadge(); updateSidebarActive(); }
 
 function renderBadge(){
-  document.getElementById("pending-count").textContent = tasks.filter(t=>t.status!=="done" && t.status!=="archived").length;
+  const pending = tasks.filter(t => t.status !== "done" && t.status !== "archived");
+  document.getElementById("pending-count").textContent = pending.length;
 }
 
 function updateSidebarActive(){
@@ -97,7 +98,7 @@ function updateSidebarActive(){
 
 function filteredTasks(){
   return tasks.filter(t=>{
-    if(t.status === "archived") return false; // Ocultar archivados del tablero principal
+    if(t.status === "archived") return false; 
     if(activeCategory && t.category!==activeCategory) return false;
     if(activePriority && t.priority!==activePriority) return false;
     if(searchQuery && !t.title?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -121,11 +122,9 @@ function taskCard(t){
       </div>`;
   }
 
-  // Contadores
-  const ctxVal = t.context || "";
-  const ctxCount = ctxVal ? 1 : 0;
   const linkCount = t.link ? 1 : 0;
   const docCount = t.document ? 1 : 0;
+  const ctxCount = t.context ? 1 : 0;
 
   return `
   <div class="task-card" data-id="${t.id}" draggable="true">
@@ -133,7 +132,7 @@ function taskCard(t){
       <div class="tc-header">
         <div class="tc-title-wrap">
           <div class="tc-title" onclick="startEditTitle('${t.id}')" title="Clic para editar">${t.title}</div>
-          <div class="tc-subtitle">${t.title}</div>
+          ${t.context ? `<div class="tc-subtitle">${t.context}</div>` : ''}
         </div>
         ${dateHtml}
       </div>
@@ -151,11 +150,6 @@ function taskCard(t){
           <option value="urgente" ${t.priority==='urgente'?'selected':''}>Urgente</option>
         </select>
       </div>
-
-      <div class="tc-inline-ctx" id="ctx-box-${t.id}" style="${ctxCount ? 'display:block' : 'display:none'}">
-        <textarea onblur="updateTaskField('${t.id}', 'context', this.value)" placeholder="Agrega un comentario...">${ctxVal}</textarea>
-      </div>
-
     </div>
     
     <div class="tc-footer">
@@ -166,7 +160,7 @@ function taskCard(t){
         <div class="tc-icon-btn" onclick="openDocModal('${t.id}')" title="Documentos">
           <i class="fi fi-rr-document"></i><span>${docCount}</span>
         </div>
-        <div class="tc-icon-btn" onclick="toggleContextInline('${t.id}')" title="Comentarios">
+        <div class="tc-icon-btn" onclick="openContextModal('${t.id}')" title="Comentarios">
           <i class="fi fi-rr-comment-text"></i><span>${ctxCount}</span>
         </div>
       </div>
@@ -200,23 +194,31 @@ function renderKanban(){
   document.querySelectorAll(".task-card").forEach(attachDrag);
 }
 
-window.toggleContextInline = (id) => {
-  const box = document.getElementById(`ctx-box-${id}`);
-  if(box.style.display === "none") {
-    box.style.display = "block";
-    box.querySelector("textarea").focus();
-  } else {
-    // Solo oculta si está vacío, según requerimiento
-    if(!box.querySelector("textarea").value.trim()) box.style.display = "none";
-  }
-}
+window.startEditTitle = (id) => {
+  const t = tasks.find(x=>x.id===id);
+  if(!t) return;
+  const cardEl = document.querySelector(`.task-card[data-id="${id}"] .tc-title`);
+  const old = t.title;
+  cardEl.contentEditable = "true";
+  cardEl.focus();
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(cardEl);
+  sel.removeAllRanges(); sel.addRange(range);
+  cardEl.onblur = async () => {
+    cardEl.contentEditable = "false";
+    const newTitle = cardEl.textContent.trim();
+    if(newTitle && newTitle !== old) await updateDoc(doc(db,"voztasks",id),{title:newTitle});
+  };
+  cardEl.onkeydown = e => { if(e.key==="Enter"){ e.preventDefault(); cardEl.blur(); } };
+};
 
 window.highlightTask = (id) => {
+  document.querySelectorAll('.task-card').forEach(el => el.classList.remove('active-highlight'));
   const el = document.querySelector(`.task-card[data-id="${id}"]`);
   if(el) {
     el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("highlight-flash");
-    setTimeout(() => el.classList.remove("highlight-flash"), 2500);
+    el.classList.add("active-highlight");
   }
 }
 
@@ -261,6 +263,11 @@ function openModal(html, onSave){
   document.getElementById("modal-save").onclick = onSave;
 }
 window.closeModal = () => document.getElementById("modal-overlay").classList.remove("open");
+document.getElementById("modal-cancel").onclick = window.closeModal;
+
+window.addEventListener('keydown', e => { 
+  if(e.key === 'Escape') window.closeModal(); 
+});
 
 window.openLinkModal = (id)=>{
   const t = tasks.find(x=>x.id===id);
@@ -283,6 +290,22 @@ window.openDocModal = (id)=>{
     closeModal();
   });
 };
+
+window.openContextModal = (id)=>{
+  const t = tasks.find(x=>x.id===id);
+  openModal(`
+    <h3 class="modal-title">Editar Contexto / Comentario</h3>
+    <textarea id="modal-val" rows="4" placeholder="Detalles de la tarea..." class="modal-input" style="height:100px; resize:vertical;">${t?.context||""}</textarea>
+  `, async ()=>{
+    await updateDoc(doc(db,"voztasks",id),{context:document.getElementById("modal-val").value.trim()||null});
+    closeModal();
+  });
+};
+
+/* ---- Filters ---- */
+window.setCategory = id=>{ activeCategory=activeCategory===id?null:id; renderAll(); };
+window.setPriority = id=>{ activePriority=activePriority===id?null:id; renderAll(); };
+window.setSearch = ()=>{ searchQuery=document.getElementById("search-input").value; renderKanban(); };
 
 /* ---- Calendar ---- */
 function renderCalendar(){
@@ -311,11 +334,8 @@ function renderCalendar(){
   for(let d=1;d<=daysInMonth;d++){
     const isToday=d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
     const dayTasks=tasksByDay[d]||[];
+    const stickers = dayTasks.slice(0,3).map(t=> `<span class="cal-sticker" style="background:${catColor(t.category)}" title="${t.title}" onclick="highlightTask('${t.id}'); event.stopPropagation();"></span>`).join("");
     
-    // Stickers usan color de CATEGORÍA
-    const stickers = dayTasks.slice(0,3).map(t=> `<span class="cal-sticker" style="background:${catColor(t.category)}" title="${t.title}" onclick="highlightTask('${t.id}')"></span>`).join("");
-    
-    // Si hay tareas, hacer clickeable la celda para listar tareas abajo
     html+=`<div class="cal-cell${isToday?" today":""}${dayTasks.length?" has-t":""}" ${dayTasks.length?`onclick="showDayTasks(${d}, ${month}, ${year})"`:""}>
       <span class="cal-num">${d}</span>
       <div class="cal-stickers">${stickers}</div>
@@ -324,14 +344,12 @@ function renderCalendar(){
   html+="</div>";
   document.getElementById("cal-body").innerHTML=html;
 
-  // Próximos deadlines también en color de CATEGORÍA y clickeables
   const upcoming=tasks.filter(t=>t.deadline && t.status!=="archived").sort((a,b)=>new Date(a.deadline)-new Date(b.deadline)).slice(0,6);
   document.getElementById("cal-upcoming").innerHTML=upcoming.length
     ? upcoming.map(t=>{
         const d=new Date(t.deadline+"T12:00:00");
         const ds=d.toLocaleDateString("es-MX",{day:"numeric",month:"short"});
-        const cColor = catColor(t.category);
-        const dot=`<span style="width:6px;height:6px;border-radius:50%;background:${cColor};display:inline-block;flex-shrink:0"></span>`;
+        const dot=`<span style="width:6px;height:6px;border-radius:50%;background:${catColor(t.category)};display:inline-block;flex-shrink:0"></span>`;
         return `<div class="upcoming-item" onclick="highlightTask('${t.id}')" style="cursor:pointer">${dot}<span class="upcoming-date">${ds}</span><span class="upcoming-title">${t.title}</span></div>`;
       }).join("")
     : `<p class="no-upcoming">Sin deadlines próximos</p>`;
@@ -349,6 +367,171 @@ window.showDayTasks = (d, m, y) => {
 window.calPrev=()=>{ currentMonth.setMonth(currentMonth.getMonth()-1); renderCalendar(); };
 window.calNext=()=>{ currentMonth.setMonth(currentMonth.getMonth()+1); renderCalendar(); };
 
+/* ---- Notes ---- */
+function renderNotes(){
+  const grid=document.getElementById("notes-grid");
+  grid.innerHTML=notes.map(n=>`
+    <div class="note-card" style="--nc:${n.color||"#D5E1FF"}">
+      ${n.title?`<p class="note-title">${n.title}</p>`:""}
+      <p class="note-body">${n.body}</p>
+      <div class="note-actions">
+        <button class="note-del" onclick="deleteNote('${n.id}')">×</button>
+        <span class="note-date">${new Date(n.createdAt).toLocaleDateString("es-MX",{day:"numeric",month:"short"})}</span>
+      </div>
+    </div>
+  `).join("")||`<p class="no-upcoming">Sin notas aún</p>`;
+}
+
+window.addNote=async()=>{
+  const title=document.getElementById("note-title").value.trim();
+  const body=document.getElementById("note-body").value.trim();
+  if(!body) return;
+  const colors=["#D5E1FF","#E8D5FF","#D5FFED","#FFE8D5","#FFF3D5"];
+  const color=colors[Math.floor(Math.random()*colors.length)];
+  await addDoc(notesCol,{title:title||null,body,color,createdAt:new Date().toISOString()});
+  document.getElementById("note-title").value="";
+  document.getElementById("note-body").value="";
+};
+
+window.deleteNote=async id=>{ if(confirm("¿Eliminar nota?")) await deleteDoc(doc(db,"fastask_notes",id)); };
+
+/* ---- Voice & Input Manual ---- */
+async function parseTask(transcript){
+  const today=new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  const res=await fetch("https://gemini-proxy.osvaldo-ronquillo.workers.dev/",{
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({transcript,today})
+  });
+  return await res.json();
+}
+
+async function saveTask(parsed){
+  const catGuess = parsed.category || guessCategory(parsed.context||parsed.title||"");
+  await addDoc(tasksCol,{
+    title:parsed.title,
+    time:parsed.time||null,
+    priority:parsed.priority||"normal",
+    category:catGuess,
+    context:parsed.context||null, link:null, 
+    deadline: parsed.deadline || null,
+    status:"todo", done:false,
+    createdAt:new Date().toISOString()
+  });
+}
+
+function guessCategory(ctx){
+  const c=(ctx||"").toLowerCase();
+  if(c.includes("freelance")||c.includes("cliente")) return "freelance";
+  if(c.includes("trabajo")||c.includes("oficina")||c.includes("interia")) return "trabajo";
+  if(c.includes("unir")||c.includes("universidad")||c.includes("escuela")||c.includes("estudio")) return "estudio";
+  return "personal";
+}
+
+function initRecognition(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ showFeedback("Usa Chrome para voz","error"); return null; }
+  const r=new SR(); r.lang="es-MX"; r.continuous=false; r.interimResults=true;
+  r.onstart=()=>{ isListening=true; updateMicUI(true); showFeedback("Escuchando…","listening"); };
+  r.onresult=e=>{ document.getElementById("transcript-preview").textContent=Array.from(e.results).map(r=>r[0].transcript).join(""); };
+  r.onerror=e=>{ isListening=false; updateMicUI(false); showFeedback("Error: "+e.error,"error"); };
+  r.onend=async()=>{
+    isListening=false; updateMicUI(false);
+    const text=document.getElementById("transcript-preview").textContent.trim();
+    if(!text){ showFeedback("No escuché nada","error"); return; }
+    showFeedback("Procesando…","processing");
+    try{
+      const parsed=await parseTask(text);
+      const tasksArray = Array.isArray(parsed) ? parsed : [parsed];
+      let guardadas = 0;
+      for (const p of tasksArray) {
+        if (p.action === "agregar" || p.title) {
+          await saveTask(p);
+          guardadas++;
+        }
+      }
+      if (guardadas > 0) { showFeedback(`✓ ${guardadas} tarea(s)`,"success"); }
+      else showFeedback("No detecté tarea","info");
+    }catch(e){ showFeedback("Error al procesar","error"); console.error(e); }
+    setTimeout(()=>{ document.getElementById("transcript-preview").textContent=""; },3000);
+  };
+  return r;
+}
+
+window.toggleMic=()=>{
+  if(isListening){ recognition?.stop(); return; }
+  if(!recognition) recognition=initRecognition();
+  recognition?.start();
+};
+
+function updateMicUI(on){
+  document.getElementById("mic-btn").classList.toggle("listening",on);
+  document.getElementById("mic-ring").classList.toggle("active",on);
+}
+
+function showFeedback(msg,type){
+  const fb=document.getElementById("feedback");
+  fb.textContent=msg; fb.className="feedback "+type;
+  fb.style.display="inline-block";
+  setTimeout(()=>{ fb.style.opacity="1"; },20);
+  if(["success","info"].includes(type)) {
+    setTimeout(()=>{
+      fb.style.opacity="0";
+      setTimeout(()=>{ fb.style.display="none"; },400);
+    },4000);
+  }
+}
+
+window.addManual=async()=>{
+  const input=document.getElementById("manual-input");
+  const val=input.value.trim(); if(!val) return;
+  showFeedback("Procesando…","processing");
+  try{
+    const parsed=await parseTask(val);
+    const tasksArray = Array.isArray(parsed) ? parsed : [parsed];
+    let guardadas = 0;
+    for (const p of tasksArray) {
+      if (p.action === "agregar" || p.title) {
+        await saveTask(p);
+        guardadas++;
+      }
+    }
+    if (guardadas > 0) { showFeedback(`✓ ${guardadas} tarea(s)`,"success"); input.value=""; }
+    else { showFeedback("No detecté tarea","info"); }
+  }catch(e){ showFeedback("Error al procesar","error"); console.error(e); }
+};
+
+window.onManualKey=e=>{ if(e.key==="Enter") window.addManual(); };
+
+window.onInputChange=()=>{
+  const hasText = document.getElementById("manual-input").value.trim().length > 0;
+  document.getElementById("icon-mic").style.display = hasText ? "none" : "block";
+  document.getElementById("icon-check").style.display = hasText ? "block" : "none";
+  const btn = document.getElementById("mic-btn");
+  if(hasText){
+    btn.style.background = "var(--accent)";
+    btn.style.borderColor = "var(--accent)";
+  } else {
+    btn.style.background = "";
+    btn.style.borderColor = "";
+  }
+};
+
+window.handleMicOrSave=()=>{
+  const hasText = document.getElementById("manual-input").value.trim().length > 0;
+  if(hasText){
+    window.addManual();
+    setTimeout(()=>{
+      document.getElementById("icon-mic").style.display = "block";
+      document.getElementById("icon-check").style.display = "none";
+      document.getElementById("mic-btn").style.background = "";
+      document.getElementById("mic-btn").style.borderColor = "";
+    }, 100);
+  } else {
+    window.toggleMic();
+  }
+};
+window.toggleSidebar=()=>document.getElementById("sidebar").classList.toggle("open");
+
 /* ---- Tema y Colores ---- */
 window.toggleTheme = () => {
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
@@ -360,10 +543,9 @@ window.changeColor = (type, id, value) => {
   const varName = `--${type}-${id}`;
   document.documentElement.style.setProperty(varName, value);
   localStorage.setItem(varName, value);
-  renderAll(); // Forzar re-render para actualizar SVG/Bolitas
+  renderAll(); 
 };
 
-// Cargar colores de localStorage
 ['cat-freelance', 'cat-trabajo', 'cat-estudio', 'cat-personal', 'prio-normal', 'prio-alta', 'prio-urgente'].forEach(key => {
   const saved = localStorage.getItem(`--${key}`);
   if (saved) document.documentElement.style.setProperty(`--${key}`, saved);
@@ -380,7 +562,6 @@ setTimeout(() => {
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
-/* VARIABLES TEMA OSCURO (Por defecto) */
 :root{
   --bg: #121212;
   --surface: #121212;
@@ -398,7 +579,6 @@ setTimeout(() => {
   --sidebar-w: 220px;
   --right-w: 280px;
 
-  /* Variables dinámicas de color */
   --cat-freelance: #34d399;
   --cat-trabajo: #FF762C;
   --cat-estudio: #a78bfa;
@@ -408,7 +588,6 @@ setTimeout(() => {
   --prio-urgente: #471EC5;
 }
 
-/* VARIABLES TEMA CLARO */
 [data-theme="light"] {
   --bg: #f9f9f9;
   --surface: #ffffff;
@@ -423,7 +602,7 @@ setTimeout(() => {
 
 body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:100vh;overflow:hidden}
 
-.app{display:grid;grid-template-columns:var(--sidebar-w) 1fr var(--right-w);grid-template-rows:60px 1fr;height:100vh}
+.app{display:grid;grid-template-columns:var(--sidebar-w) 1fr var(--right-w);grid-template-rows:60px 1fr 80px;height:100vh}
 
 .topbar{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--border);position:relative;z-index:20}
 .logo{height:28px;object-fit:contain}
@@ -431,10 +610,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .theme-btn{background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--ink2);transition:all .2s; margin-left:auto}
 .theme-btn:hover{background:var(--surface2)}
 
-#sidebar{grid-column:1;grid-row:2;background:var(--surface);border-right:1px solid var(--border);padding:16px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:24px}
+#sidebar{grid-column:1;grid-row:2/4;background:var(--surface);border-right:1px solid var(--border);padding:16px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:24px; font-family:var(--font)}
 .sidebar-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);margin-bottom:8px;padding-left:8px}
 .sidebar-row{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;margin-bottom:2px}
-.cat-item,.prio-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:background .15s,color .15s;border:none;background:none;color:var(--ink2);flex:1}
+.cat-item,.prio-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:background .15s,color .15s;border:none;background:none;color:var(--ink2);flex:1; font-family:var(--font)}
 .cat-item:hover,.prio-item:hover{background:var(--surface2);color:var(--ink)}
 .cat-item.active,.prio-item.active{background:var(--surface3);color:var(--ink)}
 .prio-dot{width:7px;height:7px;border-radius:50%;background:var(--pc);flex-shrink:0}
@@ -442,19 +621,18 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .sidebar-color-picker::-webkit-color-swatch-wrapper{padding:0}
 .sidebar-color-picker::-webkit-color-swatch{border:1px solid var(--border);border-radius:50%}
 
-/* === MASONRY KANBAN === */
+/* === MASONRY KANBAN VERTICAL === */
 .main{grid-column:2;grid-row:2;overflow:hidden;padding:20px;display:flex;flex-direction:column;gap:16px;background:var(--bg)}
 .kanban-wrap{display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;flex:1;overflow:hidden}
 .col-wrap{display:flex;flex-direction:column;overflow:hidden}
 .col-title{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .col-badge{background:var(--surface3);border-radius:100px;padding:2px 8px;font-size:10px;color:var(--ink)}
 
-/* Configuración Masonry CSS puro */
 .kanban-col{
   flex:1;overflow-y:auto;padding-right:4px;
-  column-count: 2; /* 2 columnas internamente */
+  column-count: 2; 
   column-gap: 12px;
-  display: block; /* Debe ser block para masonry */
+  display: block; 
 }
 .kanban-col::-webkit-scrollbar{width:4px}
 .kanban-col::-webkit-scrollbar-track{background:transparent}
@@ -462,10 +640,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .kanban-col.drag-over{background:rgba(50,76,243,.05); border-radius:10px}
 .empty-col{font-size:11px;color:var(--ink3);text-align:center;padding:24px;font-family:var(--mono); column-span: all}
 
-/* === CARD REDESIGN === */
+/* === CARD DESIGN === */
 .task-card{
   width: 100%;
-  break-inside: avoid; /* Previene cortes en Masonry */
+  break-inside: avoid; 
   margin-bottom: 12px;
   padding: 15px; 
   background: var(--surface-card); 
@@ -477,43 +655,34 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   transition: box-shadow 0.2s, outline-color 0.2s;
 }
 .task-card.dragging { opacity: 0.5; cursor: grabbing; }
-@keyframes flash { 0%,100%{outline-color:var(--border);box-shadow:none} 50%{outline-color:var(--accent);box-shadow:0 0 15px rgba(50,76,243,0.3)} }
-.highlight-flash { animation: flash 2.5s ease; }
+.active-highlight { outline: 2px solid var(--accent) !important; box-shadow: 0 0 15px rgba(50,76,243,0.4); }
 
 .tc-main { display: flex; flex-direction: column; gap: 12px; }
 .tc-header { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
 .tc-title-wrap { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .tc-title { color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.3; word-wrap: break-word; outline: none; }
-.tc-title:focus { background: var(--surface2); padding:2px; border-radius:4px; }
+.tc-title[contenteditable="true"] { background: var(--surface2); padding:2px; border-radius:4px; }
 .tc-subtitle { color: var(--ink2); font-size: 11px; font-weight: 400; line-height: 1.3; letter-spacing: 0.11px; word-wrap: break-word; }
 
-/* Date Badge */
 .tc-date-wrap { display: flex; flex-direction: column; width: 35px; flex-shrink: 0; }
 .tc-date { padding: 5px 8px; border-radius: 4px; outline: 1px solid; outline-offset: -1px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .tc-day { color: var(--ink); font-size: 15px; font-weight: 700; line-height: 1; }
 .tc-month { color: var(--ink); font-size: 11px; font-weight: 400; line-height: 1; text-transform: lowercase; }
 
-/* Chips */
 .tc-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .tc-chip {
-  padding: 5px 6px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  padding: 5px 8px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
   color: white; font-size: 11px; font-weight: 700; font-family: var(--font);
   border: none; appearance: none; -webkit-appearance: none; text-align: center; cursor: pointer; height:24px;
 }
 .tc-chip option { background: var(--surface); color: var(--ink); font-weight:500; }
 
-/* Inline Context */
-.tc-inline-ctx { background: var(--surface2); border-radius: 6px; padding: 8px; margin-top: -4px; }
-.tc-inline-ctx textarea { width: 100%; min-height: 40px; background: transparent; border: none; outline: none; color: var(--ink2); font-size: 11px; font-family: var(--font); resize: vertical; }
-
-/* Footer Icons */
 .tc-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: auto; }
 .tc-icons { display: flex; gap: 14px; align-items: center; }
 .tc-icon-btn { display: flex; align-items: center; gap: 4px; color: var(--ink3); font-size: 12px; font-weight: 700; cursor: pointer; transition: color 0.2s; }
 .tc-icon-btn:hover { color: var(--ink); }
 .tc-icon-btn i { font-size: 14px; }
 
-/* Menu Hover */
 .tc-menu-wrap { position: relative; opacity: 0; transition: opacity 0.2s; display:flex; align-items:center; justify-content:center; }
 .task-card:hover .tc-menu-wrap { opacity: 1; }
 .tc-menu-trigger { color: var(--ink3); font-size: 16px; cursor: pointer; padding: 4px; }
@@ -525,11 +694,38 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 .tc-menu-wrap:hover .tc-dropdown { display: flex; }
-.tc-dropdown button { padding: 8px 12px; text-align: left; background: none; border: none; color: var(--ink); font-size: 11px; font-family: var(--font); cursor: pointer; }
+.tc-dropdown button { padding: 8px 12px; text-align: left; background: none; border: none; color: var(--ink); font-size: 11px; font-family: var(--font); cursor: pointer; width:100%; }
 .tc-dropdown button:hover { background: var(--surface3); }
 
+/* === FLOATING INPUT BAR === */
+.float-bar{
+  grid-column:2;grid-row:3;display:flex;align-items:center;
+  padding:12px 16px;background:var(--surface);border-top:1px solid var(--border);position:relative;z-index:10;
+}
+.float-input-wrap{
+  flex:1;display:flex;align-items:center;gap:8px;background:var(--surface2);
+  border:1px solid var(--border);border-radius:100px;padding:10px 16px;transition:border-color .2s,box-shadow .2s;
+}
+.float-input-wrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(50,76,243,.15)}
+.float-input-wrap input{flex:1;border:none;background:transparent;font-family:var(--font);font-size:14px;color:var(--ink);outline:none}
+.float-input-wrap input::placeholder{color:var(--ink3)}
+#transcript-preview{font-size:12px;color:var(--ink2);font-style:italic;white-space:nowrap;overflow:hidden;max-width:160px;text-overflow:ellipsis}
+.mic-wrapper{position:relative;display:flex;align-items:center;justify-content:center}
+.mic-ring{position:absolute;inset:-5px;border-radius:50%;border:1.5px solid var(--accent);opacity:0;pointer-events:none;transition:opacity .3s}
+.mic-ring.active{opacity:.6;animation:pulse 1.2s ease-in-out infinite}
+
+#mic-btn{width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--surface3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;position:relative;z-index:1;flex-shrink:0}
+#mic-btn:hover{background:var(--accent);border-color:var(--accent)}
+#mic-btn.listening{background:var(--accent);border-color:var(--accent)}
+
+.feedback{font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:100px;transition:opacity .4s;white-space:nowrap;flex-shrink:0;opacity:0;display:none}
+.feedback.listening{background:var(--surface3);color:var(--ink2)}
+.feedback.processing{background:rgba(198,134,209,.2);color:var(--accent2)}
+.feedback.success{background:rgba(50,243,130,.15);color:#4ade80}
+.feedback.error{background:rgba(239,68,68,.15);color:#f87171}
+
 /* === RIGHT PANEL === */
-.right-panel{grid-column:3;grid-row:2;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.right-panel{grid-column:3;grid-row:2/4;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .right-tabs{display:flex;border-bottom:1px solid var(--border)}
 .rtab{flex:1;padding:12px;text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent}
 .rtab.active{color:var(--accent);border-bottom-color:var(--accent)}
@@ -548,7 +744,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .cal-cell.today{background:var(--accent);border-radius:6px}
 .cal-cell.today .cal-num{color:#fff}
 .cal-stickers{display:flex;gap:2px;flex-wrap:wrap;justify-content:center;margin-top:2px}
-.cal-sticker{width:6px;height:6px;border-radius:50%}
+.cal-sticker{width:6px;height:6px;border-radius:50%; cursor:pointer;}
 
 .cal-upcoming-section{border-top:1px solid var(--border);padding-top:16px; margin-top:10px}
 .cal-upcoming-title{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin-bottom:8px}
@@ -556,6 +752,22 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .upcoming-item:hover{background:var(--surface2)}
 .upcoming-date{font-family:var(--mono);font-size:10px;color:var(--ink3);white-space:nowrap;min-width:40px}
 .upcoming-title{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+
+/* Notes Section (Google Keep Style) */
+.note-new{display:flex;flex-direction:column;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:4px}
+.note-new input,.note-new textarea{background:transparent;border:none;outline:none;font-family:var(--font);color:var(--ink);resize:none;width:100%}
+.note-new input{font-size:13px;font-weight:600;border-bottom:1px solid var(--border);padding-bottom:6px}
+.note-new input::placeholder{color:var(--ink3)}
+.note-new textarea{font-size:12px;line-height:1.5;color:var(--ink2)}
+.note-add-btn{align-self:flex-end;padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:10px;}
+.notes-grid{display:flex;flex-direction:column;gap:8px}
+.note-card{background:color-mix(in srgb,var(--nc) 20%,var(--surface));border:1px solid color-mix(in srgb,var(--nc) 40%,var(--border));border-radius:10px;padding:10px;}
+.note-title{font-size:12px;font-weight:600;color:var(--ink);margin-bottom:4px}
+.note-body{font-size:12px;color:var(--ink2);line-height:1.5;white-space:pre-wrap}
+.note-actions{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.note-del{background:none;border:none;cursor:pointer;color:var(--ink3);font-size:15px;}
+.note-del:hover{color:#f87171}
+.note-date{font-family:var(--mono);font-size:9px;color:var(--ink3)}
 
 /* === MODAL === */
 #modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
@@ -566,21 +778,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 .modal-btn{padding:8px 18px;border-radius:8px;cursor:pointer;font-family:var(--font);font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--surface2);color:var(--ink)}
 .modal-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-
-/* Responsive adjustments */
-@media(max-width:1100px){ .kanban-col { column-count: 1; } }
-@media(max-width:900px){
-  .app{display:flex !important;flex-direction:column;height:100dvh;}
-  .main{padding:10px; flex:1;}
-  .kanban-wrap{grid-template-columns:1fr; overflow-y:auto; display:flex;}
-  .kanban-col { column-count: 1; display:flex; flex-direction:column; gap:10px; }
-  .task-card { margin-bottom:0; }
-  .right-panel{display:none;}
-  #sidebar{position:fixed;left:-100%;top:0;bottom:0;z-index:300;width:260px;transition:left .3s}
-}
 </style>
 </head>
 <body>
+
+<div id="sidebar-backdrop" class="sidebar-backdrop" onclick="toggleSidebar()"></div>
 
 <div id="auth-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg)">
   <div style="display:flex;flex-direction:column;align-items:center;gap:20px;padding:40px;background:var(--surface);border:1px solid var(--border);border-radius:20px">
@@ -594,8 +796,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   <header class="topbar">
     <img src="https://raw.githubusercontent.com/osvaldo-ronquillo/Fastask/main/img/fastask.png?v=202606020748" class="logo" alt="Fastask">
     <span class="badge" id="pending-count">0</span>
-    
-    <button class="theme-btn" onclick="toggleTheme()" title="Cambiar Tema"><i class="fi fi-rr-moon-stars"></i></button>
+    <button class="theme-btn" onclick="toggleTheme()"><i class="fi fi-rr-moon-stars"></i></button>
   </header>
 
   <aside id="sidebar">
@@ -631,9 +832,31 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     </div>
   </main>
 
+  <div class="float-bar">
+    <div class="float-input-wrap">
+      <input type="text" id="manual-input" placeholder="Escribe o dicta una tarea…" onkeydown="onManualKey(event)" oninput="onInputChange()">
+      <span id="transcript-preview"></span>
+      <div class="mic-wrapper">
+        <div class="mic-ring" id="mic-ring"></div>
+        <button id="mic-btn" onclick="handleMicOrSave()" aria-label="Micrófono o Guardar">
+          <svg id="icon-mic" width="17" height="17" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z" stroke="#a09cc0" stroke-width="1.8"/>
+            <path d="M6 12a6 6 0 0 0 12 0" stroke="#a09cc0" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="12" y1="18" x2="12" y2="22" stroke="#a09cc0" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <svg id="icon-check" width="17" height="17" viewBox="0 0 24 24" fill="none" style="display:none">
+            <path d="M4 12l6 6L20 6" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div id="feedback" class="feedback">—</div>
+  </div>
+
   <aside class="right-panel">
     <div class="right-tabs">
       <button class="rtab active" onclick="switchTab('cal')">Planeador</button>
+      <button class="rtab" onclick="switchTab('notes')">Notas</button>
     </div>
     <div class="right-tab-content visible" id="tab-cal">
       <div class="cal-nav-row">
@@ -646,6 +869,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
         <p class="cal-upcoming-title">Próximos deadlines</p>
         <div id="cal-upcoming"></div>
       </div>
+    </div>
+    <div class="right-tab-content" id="tab-notes">
+      <div class="note-new">
+        <input type="text" id="note-title" placeholder="Título (opcional)">
+        <textarea id="note-body" rows="3" placeholder="Escribe una nota…"></textarea>
+        <button class="note-add-btn" onclick="addNote()">+ Agregar</button>
+      </div>
+      <div class="notes-grid" id="notes-grid"></div>
     </div>
   </aside>
 </div>
@@ -663,8 +894,24 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 <script>
 function switchTab(tab){
   document.querySelectorAll(".right-tab-content").forEach(el=>el.classList.remove("visible"));
+  document.querySelectorAll(".rtab").forEach(el=>el.classList.remove("active"));
   document.getElementById("tab-"+tab).classList.add("visible");
+  event.target.classList.add("active");
 }
+
+setTimeout(()=>{
+  document.querySelectorAll(".kanban-col").forEach(col=>{
+    col.addEventListener("dragover", e=>{ e.preventDefault(); col.classList.add("drag-over"); });
+    col.addEventListener("dragleave", ()=>col.classList.remove("drag-over"));
+    col.addEventListener("drop", async e=>{
+      e.preventDefault(); col.classList.remove("drag-over");
+      if(!window.dragSrcId) return;
+      const {getFirestore,doc,updateDoc}=await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+      const db = getFirestore();
+      await updateDoc(doc(db,"voztasks",window.dragSrcId),{status:col.dataset.status});
+    });
+  });
+},500);
 </script>
 </body>
 </html>

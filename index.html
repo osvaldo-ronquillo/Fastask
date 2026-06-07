@@ -120,24 +120,32 @@ function filteredTasks(){
   });
 }
 
+function sortTasksByDeadline(tasksArray) {
+  return tasksArray.sort((a, b) => {
+    if (!a.deadline) return 1;
+    if (!b.deadline) return -1;
+    return new Date(a.deadline) - new Date(b.deadline);
+  });
+}
+
 function taskCard(t){
   const prio = getPrio(t.priority);
   
-  // Calcular días restantes
   let countdownHtml = '';
-  let dateHtml = '';
+  let dateHtml = `<div class="tc-date-box empty-date" onclick="openDeadlineModal('${t.id}')" title="Asignar fecha"><i class="fi fi-rr-calendar-plus"></i></div>`;
+  
   if (t.deadline) {
     const d = new Date(t.deadline+"T12:00:00");
     const today = new Date(); today.setHours(0,0,0,0);
     const dlStart = new Date(t.deadline+"T00:00:00");
     const diff = Math.ceil((dlStart - today) / (1000 * 60 * 60 * 24));
     
-    let cdText = diff === 0 ? "Hoy" : diff > 0 ? `Faltan ${diff}` : `${diff}`;
+    let cdText = diff > 0 ? `+${diff}` : (diff < 0 ? `${diff}` : `0`);
     countdownHtml = `<div class="tc-countdown">${cdText}</div>`;
     
     const day = d.getDate();
     const month = d.toLocaleDateString("es-MX",{month:"short"}).slice(0,3).toLowerCase();
-    dateHtml = `<div class="tc-date-box"><div class="tc-day">${day}</div><div class="tc-month">${month}</div></div>`;
+    dateHtml = `<div class="tc-date-box" onclick="openDeadlineModal('${t.id}')" title="Cambiar fecha"><div class="tc-day">${day}</div><div class="tc-month">${month}</div></div>`;
   }
 
   const attachCount = (t.link ? 1 : 0) + (t.document ? 1 : 0);
@@ -158,10 +166,19 @@ function taskCard(t){
       
       <div class="tc-bottom">
         <div class="tc-icons">
-          <div class="tc-icon-item" title="Prioridad: ${prio.label}">
-            <i class="fi ${prio.icon}"></i>
-            <span>${prio.letter}</span>
+          
+          <div class="tc-menu-wrap" title="Cambiar Prioridad">
+            <div class="tc-icon-item" style="cursor: pointer;">
+              <i class="fi ${prio.icon}"></i>
+              <span>${prio.letter}</span>
+            </div>
+            <div class="tc-dropdown tc-dropdown-left">
+              <button onclick="updateTaskField('${t.id}', 'priority', 'baja')"><i class="fi fi-rr-signal-alt"></i> Baja</button>
+              <button onclick="updateTaskField('${t.id}', 'priority', 'media')"><i class="fi fi-rr-signal-alt-1"></i> Media</button>
+              <button onclick="updateTaskField('${t.id}', 'priority', 'alta')"><i class="fi fi-rr-signal-alt-2"></i> Alta</button>
+            </div>
           </div>
+
           <div class="tc-icon-item" onclick="openAttachmentsModal('${t.id}')" title="Adjuntos">
             <i class="fi fi-rr-paperclip-vertical"></i>
             <span>${attachCount}</span>
@@ -172,8 +189,8 @@ function taskCard(t){
           </div>
         </div>
         
-        <div class="tc-menu-wrap">
-          <i class="fi fi-rs-menu-dots tc-menu-trigger"></i>
+        <div class="tc-menu-wrap tc-menu-wrap-always">
+          <i class="fi fi-rr-angle-small-down tc-menu-trigger"></i>
           <div class="tc-dropdown">
             <button onclick="duplicateTask('${t.id}')"><i class="fi fi-rr-clone"></i> Duplicar</button>
             ${t.status === 'archived' 
@@ -191,14 +208,16 @@ function renderKanban(){
   const ft = filteredTasks();
   
   if(isArchiveView) {
-    document.getElementById("archive-masonry").innerHTML = ft.length ? ft.map(taskCard).join("") : `<div class="empty-col">Archivo vacío</div>`;
+    const sortedArchive = sortTasksByDeadline(ft);
+    document.getElementById("archive-masonry").innerHTML = sortedArchive.length ? sortedArchive.map(taskCard).join("") : `<div class="empty-col">Archivo vacío</div>`;
     document.querySelectorAll("#archive-masonry .task-card").forEach(el => el.removeAttribute("draggable"));
     return;
   }
 
-  const todo = ft.filter(t=>!t.status||t.status==="todo");
-  const inprog = ft.filter(t=>t.status==="inprogress");
-  const done = ft.filter(t=>t.status==="done");
+  // Filtrado y Ordenado por Deadline
+  const todo = sortTasksByDeadline(ft.filter(t=>!t.status||t.status==="todo"));
+  const inprog = sortTasksByDeadline(ft.filter(t=>t.status==="inprogress"));
+  const done = sortTasksByDeadline(ft.filter(t=>t.status==="done"));
 
   document.getElementById("col-todo").innerHTML = todo.length ? `<div class="masonry-wrap">${todo.map(taskCard).join("")}</div>` : `<div class="empty-col">Sin tareas</div>`;
   document.getElementById("col-inprogress").innerHTML = inprog.length ? `<div class="masonry-wrap">${inprog.map(taskCard).join("")}</div>` : `<div class="empty-col">Sin tareas</div>`;
@@ -285,7 +304,25 @@ document.addEventListener('keydown', e => {
   if(e.key === 'Escape' && document.getElementById("modal-overlay").classList.contains("open")) { window.closeModal(); }
 });
 
-// Modal Unificado de Attachments
+// Modal Deadline
+window.openDeadlineModal = (id)=>{
+  const t = tasks.find(x=>x.id===id);
+  const val = t?.deadline||"";
+  openModal(`
+    <h3 class="modal-title">Establecer Fecha Límite</h3>
+    <input type="date" id="modal-date" value="${val}" class="modal-input" style="font-size:15px;">
+    <div class="modal-btns">
+      <button class="modal-btn" onclick="closeModal()">Cancelar</button>
+      <button class="modal-btn primary" onclick="saveDeadline('${id}')">Guardar</button>
+    </div>
+  `);
+};
+window.saveDeadline = async (id) => {
+  const date = document.getElementById("modal-date").value;
+  await updateDoc(doc(db,"voztasks",id),{deadline:date||null});
+  closeModal();
+};
+
 window.openAttachmentsModal = (id)=>{
   const t = tasks.find(x=>x.id===id);
   openModal(`
@@ -310,7 +347,6 @@ window.saveAttachments = async (id) => {
   closeModal();
 }
 
-// Modal de Contexto con Viñetas
 window.openContextModal = (id)=>{
   const t = tasks.find(x=>x.id===id);
   const bullets = (t?.context || "").split("\n").filter(c=>c.trim()!=='');
@@ -385,7 +421,6 @@ function renderCalendar(){
   html+="</div>";
   document.getElementById("cal-body").innerHTML=html;
 
-  // Mostrando los PRÓXIMOS 10 deadlines
   const upcoming=tasks.filter(t=>t.deadline && t.status!=="archived").sort((a,b)=>new Date(a.deadline)-new Date(b.deadline)).slice(0,10);
   document.getElementById("cal-upcoming").innerHTML=upcoming.length
     ? upcoming.map(t=>{
@@ -700,7 +735,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .masonry-wrap { column-count: 2; column-gap: 12px; width: 100%; }
 .empty-col{font-size:11px;color:var(--ink3);text-align:center;padding:24px;font-family:var(--mono); width: 100%;}
 
-/* === CARD DESIGN: ESCALA TAILWIND (50 - 800) === */
+/* === CARD DESIGN: ESCALA TAILWIND === */
 .task-card{
   width: 100%; break-inside: avoid; margin-bottom: 12px;
   padding: 10px; border-radius: 10px; 
@@ -708,7 +743,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   cursor: grab; position: relative;
   transition: box-shadow 0.2s, outline-color 0.2s;
   
-  /* Sistema de Color Mix (Basado en la variable --c de la categoría) */
   --c-50: color-mix(in srgb, var(--c) 10%, var(--surface));
   --c-100: color-mix(in srgb, var(--c) 15%, var(--surface));
   --c-200: color-mix(in srgb, var(--c) 30%, var(--surface));
@@ -716,34 +750,36 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   --c-400: color-mix(in srgb, var(--c) 85%, var(--surface));
   --c-800: color-mix(in srgb, var(--c) 40%, var(--ink));
 
-  background-color: var(--c-100); /* BG 100 */
-  border: 1px solid var(--c-200); /* Borde 200 */
+  background-color: var(--c-100); 
+  border: 1px solid var(--c-200); 
 }
 .task-card.dragging { opacity: 0.5; cursor: grabbing; }
 .active-highlight { outline: 2px solid var(--accent) !important; box-shadow: 0 0 15px rgba(50,76,243,0.4); }
 
 /* Left Column (Date & Countdown) */
-.tc-left { display: flex; flex-direction: column; width: 35px; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 4px; }
+.tc-left { display: flex; flex-direction: column; width: 35px; flex-shrink: 0; align-items: center; gap: 4px; }
 .tc-date-box { 
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  padding: 5px 8px; border-radius: 5px; width: 100%;
-  background-color: var(--c-400); /* Fondo Fecha 400 */
+  padding: 5px 8px; border-radius: 5px; width: 100%; cursor: pointer; transition: filter 0.2s;
+  background-color: var(--c-400); 
 }
-.tc-day { color: var(--c-50); font-size: 15px; font-weight: 700; line-height: 1; } /* Texto Fecha 50 */
-.tc-month { color: var(--c-50); font-size: 11px; font-weight: 400; line-height: 1; } /* Texto Fecha 50 */
+.tc-date-box:hover { filter: brightness(1.1); }
+.tc-date-box.empty-date { background-color: var(--c-200); color: var(--c-400); padding: 8px; }
+.tc-day { color: var(--c-50); font-size: 15px; font-weight: 700; line-height: 1; } 
+.tc-month { color: var(--c-50); font-size: 11px; font-weight: 400; line-height: 1; } 
 
 .tc-countdown {
   display: flex; align-items: center; justify-content: center; width: 100%;
   padding: 3px 0; border-radius: 5px;
-  background-color: var(--c-50); /* Fondo Countdown 50 */
-  color: var(--c-800); font-size: 12px; font-weight: 700;
+  background-color: var(--c-50); color: var(--c-800); font-size: 12px; font-weight: 700;
+  margin-top: auto; /* <-- MAGIA APLICADA AQUÍ */
 }
 
 /* Right Column (Title & Icons) */
 .tc-right { display: flex; flex-direction: column; gap: 12px; flex: 1; min-width: 0; }
 .tc-title-wrap { display: flex; flex-direction: column; gap: 4px; }
 .tc-title { 
-  color: var(--c-800); /* Título 800 */
+  color: var(--c-800); 
   font-size: 14px; font-weight: 700; line-height: 1.1; word-wrap: break-word; outline: none; 
 }
 .tc-title[contenteditable="true"] { background: var(--surface2); padding:2px; border-radius:4px; }
@@ -753,15 +789,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .tc-icons { display: flex; align-items: center; gap: 10px; }
 .tc-icon-item {
   display: inline-flex; align-items: center; gap: 4px;
-  color: var(--c-300); /* Íconos y texto 300 */
+  color: var(--c-300); 
   font-size: 12px; font-weight: 700; cursor: pointer; transition: filter 0.2s;
 }
 .tc-icon-item:hover { filter: brightness(1.3); }
 .tc-icon-item i { font-size: 14px; display:flex; align-items:center; }
 
-.tc-menu-wrap { position: relative; opacity: 0; transition: opacity 0.2s; display:flex; align-items:center; justify-content:center; }
-.task-card:hover .tc-menu-wrap { opacity: 1; }
-.tc-menu-trigger { color: var(--c-300); font-size: 16px; cursor: pointer; padding: 4px; display:flex; }
+.tc-menu-wrap { position: relative; opacity: 1; transition: opacity 0.2s; display:flex; align-items:center; justify-content:center; }
+.tc-menu-trigger { color: var(--c-300); font-size: 18px; cursor: pointer; padding: 4px; display:flex; }
 .tc-menu-trigger:hover { filter: brightness(1.3); }
 
 .tc-dropdown {
@@ -770,6 +805,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   display: none; flex-direction: column; min-width: 120px; overflow: hidden; z-index: 100;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
+.tc-dropdown-left { left: 0; right: auto; }
 .tc-menu-wrap:hover .tc-dropdown { display: flex; }
 .tc-dropdown button { 
   padding: 8px 12px; text-align: left; background: none; border: none; 
@@ -876,7 +912,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 
 <div id="sidebar-backdrop" class="sidebar-backdrop" onclick="toggleSidebar()"></div>
 
-<!-- AUTH SCREEN -->
 <div id="auth-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg)">
   <div style="display:flex;flex-direction:column;align-items:center;gap:20px;padding:40px;background:var(--surface);border:1px solid var(--border);border-radius:20px">
     <img src="https://raw.githubusercontent.com/osvaldo-ronquillo/Fastask/main/img/fastask.png?v=202606020748" style="height:36px">
@@ -884,14 +919,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   </div>
 </div>
 
-<!-- APP MAIN -->
 <div class="app" id="app-main" style="display:none">
   
   <header class="topbar">
     <img src="https://raw.githubusercontent.com/osvaldo-ronquillo/Fastask/main/img/fastask.png?v=202606020748" class="logo" alt="Fastask">
     <span class="badge" id="pending-count">0</span>
     
-    <!-- BUSCADOR -->
     <div class="search-wrap">
       <i class="fi fi-rr-search"></i>
       <input type="text" id="search-input" placeholder="Buscar tareas…" oninput="setSearch()">
@@ -916,7 +949,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
       <div class="sidebar-row"><button class="prio-item" data-id="alta" onclick="setPriority('alta')"><span class="prio-dot" style="--pc:var(--prio-alta)"></span> Alta</button><input type="color" id="picker-prio-alta" class="sidebar-color-picker" value="#471EC5" onchange="changeColor('prio', 'alta', this.value)"></div>
     </div>
 
-    <!-- BOTON ARCHIVO ABAJO -->
     <div class="sidebar-section" style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border);">
       <div class="sidebar-row">
         <button class="cat-item" id="btn-archive" onclick="toggleArchiveView()" style="justify-content: center; background: var(--surface2);"><i class="fi fi-rr-folder-download"></i> Ver Archivo</button>
@@ -925,7 +957,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   </aside>
 
   <main class="main">
-    <!-- CONTENEDOR KANBAN NORMAL -->
     <div class="kanban-wrap" id="kanban-columns">
       <div class="col-wrap">
         <div class="col-title">Sin empezar <span class="col-badge" id="cnt-todo">0</span></div>
@@ -941,7 +972,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
       </div>
     </div>
     
-    <!-- CONTENEDOR ARCHIVO (Oculto por defecto) -->
     <div id="archive-container" style="display: none; height: 100%; overflow-y: auto;">
       <div class="col-title" style="margin-bottom: 20px;">Tareas Archivadas</div>
       <div class="masonry-wrap" id="archive-masonry"></div>
@@ -998,7 +1028,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   </aside>
 </div>
 
-<!-- MODAL UNIFICADO -->
 <div id="modal-overlay">
   <div class="modal">
     <div id="modal-content"></div>

@@ -945,40 +945,106 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 
 /* === MOBILE OVERHAUL === */
 @media (max-width: 900px) {
-  .app { display: flex; flex-direction: column; height: 100vh; overflow-y: auto; overflow-x: hidden; }
-  .topbar { position: sticky; top: 0; flex-shrink: 0; justify-content: space-between; }
+
+  /* App: flex column fijo a 100dvh, sin scroll en el contenedor raíz */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* Topbar fijo arriba */
+  .topbar {
+    flex-shrink: 0;
+    justify-content: space-between;
+    padding: 10px;
+    z-index: 20;
+  }
   .mobile-btn { display: flex; }
-  .search-wrap { display: none; /* Opcional: Ocultar buscador en barra en móvil si no cabe */ }
-  
-  #sidebar { position: fixed; left: -100%; top: 0; bottom: 0; z-index: 300; width: 260px; transition: left 0.3s ease; }
+  .search-wrap { flex: 1; max-width: none; margin: 0; }
+  .theme-btn { margin-left: 0; }
+
+  /* Sidebar overlay */
+  #sidebar {
+    position: fixed;
+    left: -100%; top: 0; bottom: 0;
+    z-index: 300; width: 260px;
+    transition: left 0.3s ease;
+    grid-column: unset; grid-row: unset;
+  }
   #sidebar.open { left: 0; }
   .sidebar-backdrop.open { display: block; }
 
-  /* 1. Calendario y Notas arriba */
-  .right-panel { border-left: none; border-bottom: 1px solid var(--border); height: auto; max-height: max-content; flex-shrink: 0; }
-  
-  /* 2. Tabs Kanban móviles */
-  .mobile-kanban-nav { 
-    display: flex; gap: 8px; overflow-x: auto; padding: 12px 16px; 
-    background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  /* Right panel: calendario + notas arriba, altura fija con scroll interno */
+  .right-panel {
+    flex-shrink: 0;
+    border-left: none;
+    border-bottom: 1px solid var(--border);
+    height: 280px;
+    overflow-y: auto;
+    grid-column: unset; grid-row: unset;
+  }
+  .right-tab-content.visible { gap: 8px; }
+
+  /* Tabs kanban móvil */
+  .mobile-kanban-nav {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 10px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
   .mobile-kanban-nav::-webkit-scrollbar { display: none; }
-  .mobile-kanban-tab { 
-    padding: 8px 16px; border-radius: 20px; border: 1px solid var(--border); 
-    background: var(--surface2); color: var(--ink2); white-space: nowrap; font-size: 12px; font-weight: 600; cursor: pointer;
+  .mobile-kanban-tab {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--ink2);
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
   }
-  .mobile-kanban-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .mobile-kanban-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-  /* 3. Columnas Kanban (Solo se muestra la activa) */
-  .main { flex: 1; padding: 0; display: flex; flex-direction: column; }
-  .kanban-wrap { display: flex; padding: 16px; flex: 1; }
-  .kanban-col-wrapper { display: none; width: 100%; }
+  /* Main: ocupa el espacio restante entre tabs y float-bar */
+  .main {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    grid-column: unset; grid-row: unset;
+  }
+
+  /* Kanban: ocupa todo el main, scroll interno */
+  .kanban-wrap {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    padding: 12px;
+    overflow: hidden;
+  }
+  .kanban-col-wrapper { display: none; width: 100%; flex-direction: column; }
   .kanban-col-wrapper.mobile-active { display: flex; }
-  .col-title { display: none; /* Ocultamos los títulos porque ya están en los tabs */ }
-  .kanban-col { padding-bottom: 20px; }
+  .col-title { display: none; }
+  .kanban-col { flex: 1; overflow-y: auto; padding-bottom: 16px; }
 
-  /* 4. Barra inferior flotante */
-  .float-bar { position: sticky; bottom: 0; border-top: 1px solid var(--border); flex-shrink: 0; }
+  /* Float bar: siempre al fondo, nunca desaparece */
+  .float-bar {
+    flex-shrink: 0;
+    grid-column: unset; grid-row: unset;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .float-input-wrap { width: 100%; min-width: 0; }
 }
 </style>
 </head>

@@ -52,6 +52,7 @@ function showApp(){
   document.getElementById("auth-screen").style.display = "none";
   document.getElementById("app-main").style.display = "grid";
   startListeners();
+  setTimeout(initMobileTabs, 200);
 }
 function showAuthScreen(){
   document.getElementById("auth-screen").style.display = "flex";
@@ -82,7 +83,13 @@ function catColor(c){ return getComputedStyle(document.documentElement).getPrope
 function getPrio(id){ return PRIORITIES.find(p=>p.id===id) || PRIORITIES[0]; }
 
 /* ---- Render ---- */
-function renderAll(){ renderKanban(); renderCalendar(); renderNotes(); renderBadge(); updateSidebarActive(); }
+function renderAll(){
+  renderKanban(); renderCalendar(); renderNotes(); renderBadge(); updateSidebarActive();
+  if(isMobile()){
+    renderMobileCalendar();
+    renderMobileNotes();
+  }
+}
 
 function renderBadge(){
   const pending = tasks.filter(t => t.status !== "done" && t.status !== "archived");
@@ -632,6 +639,126 @@ window.handleMicOrSave=()=>{
     window.toggleMic();
   }
 };
+/* ---- Mobile master tabs ---- */
+const isMobile = () => window.innerWidth <= 900;
+
+function initMobileTabs() {
+  if(!isMobile()) return;
+  document.querySelector('.mobile-master-tabs').style.display = 'flex';
+  switchMasterTab('cal', document.querySelector('.mobile-master-tab'));
+}
+
+window.switchMasterTab = (tab, btn) => {
+  // Update tab buttons
+  document.querySelectorAll('.mobile-master-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Hide all panels
+  document.querySelectorAll('.mobile-panel').forEach(p => {
+    p.classList.remove('active');
+    p.style.display = 'none';
+  });
+
+  // Hide/show main (tasks panel uses the real .main)
+  const mainEl = document.querySelector('.main');
+
+  if(tab === 'tasks') {
+    document.getElementById('mpanel-tasks').classList.add('active');
+    document.getElementById('mpanel-tasks').style.display = 'flex';
+    // Move main inside tasks panel if not already there
+    const tp = document.getElementById('mpanel-tasks');
+    if(!tp.contains(mainEl)) tp.appendChild(mainEl);
+  } else if(tab === 'cal') {
+    document.getElementById('mpanel-cal').classList.add('active');
+    document.getElementById('mpanel-cal').style.display = 'flex';
+    renderMobileCalendar();
+  } else if(tab === 'notes') {
+    document.getElementById('mpanel-notes').classList.add('active');
+    document.getElementById('mpanel-notes').style.display = 'flex';
+    renderMobileNotes();
+  }
+};
+
+function renderMobileCalendar() {
+  const year = currentMonth.getFullYear(), month = currentMonth.getMonth();
+  const label = currentMonth.toLocaleDateString("es-MX",{month:"long",year:"numeric"});
+  const labelEl = document.getElementById("cal-month-label-m");
+  if(labelEl) labelEl.textContent = label.charAt(0).toUpperCase()+label.slice(1);
+
+  const firstDay = new Date(year,month,1).getDay();
+  const daysInMonth = new Date(year,month+1,0).getDate();
+  const today = new Date();
+
+  const tasksByDay = {};
+  tasks.forEach(t => {
+    if(!t.deadline) return;
+    const d = new Date(t.deadline+"T12:00:00");
+    if(d.getFullYear()===year && d.getMonth()===month) {
+      const day = d.getDate();
+      if(!tasksByDay[day]) tasksByDay[day] = [];
+      tasksByDay[day].push(t);
+    }
+  });
+
+  let html = '<div class="cal-grid"><div class="cal-hdr">D</div><div class="cal-hdr">L</div><div class="cal-hdr">M</div><div class="cal-hdr">M</div><div class="cal-hdr">J</div><div class="cal-hdr">V</div><div class="cal-hdr">S</div>';
+  for(let i=0;i<firstDay;i++) html+=`<div class="cal-cell empty"></div>`;
+  for(let d=1;d<=daysInMonth;d++){
+    const isToday=d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
+    const dayTasks=tasksByDay[d]||[];
+    const stickers=dayTasks.slice(0,3).map(t=>`<span class="cal-sticker" style="background:${catColor(t.category)}" title="${t.title}"></span>`).join("");
+    html+=`<div class="cal-cell${isToday?" today":""}${dayTasks.length?" has-t":""}"><span class="cal-num">${d}</span><div class="cal-stickers">${stickers}</div></div>`;
+  }
+  html += "</div>";
+  const bodyEl = document.getElementById("cal-body-m");
+  if(bodyEl) bodyEl.innerHTML = html;
+
+  const upcoming = tasks.filter(t=>t.deadline&&t.status!=="archived").sort((a,b)=>new Date(a.deadline)-new Date(b.deadline)).slice(0,8);
+  const upcomingEl = document.getElementById("cal-upcoming-m");
+  if(upcomingEl) upcomingEl.innerHTML = upcoming.length
+    ? upcoming.map(t=>{
+        const d=new Date(t.deadline+"T12:00:00");
+        const ds=d.toLocaleDateString("es-MX",{day:"numeric",month:"short"});
+        const catCol=catColor(t.category);
+        const style=`background-color:color-mix(in srgb,${catCol} 15%,var(--surface));border:1px solid color-mix(in srgb,${catCol} 30%,transparent);`;
+        return `<div class="upcoming-item" style="${style}"><span style="width:6px;height:6px;border-radius:50%;background:${catCol};display:inline-block;flex-shrink:0"></span><span class="upcoming-date">${ds}</span><span class="upcoming-title">${t.title}</span></div>`;
+      }).join("")
+    : `<p class="no-upcoming">Sin deadlines próximos</p>`;
+}
+
+function renderMobileNotes() {
+  const grid = document.getElementById("notes-grid-m");
+  if(!grid) return;
+  grid.innerHTML = notes.map(n=>`
+    <div class="note-card" style="--nc:${n.color||"#D5E1FF"}">
+      ${n.title?`<p class="note-title">${n.title}</p>`:""}
+      <p class="note-body">${n.body}</p>
+      <div class="note-actions">
+        <button class="note-del" onclick="deleteNote('${n.id}')"><i class="fi fi-rr-trash"></i></button>
+        <span class="note-date">${new Date(n.createdAt).toLocaleDateString("es-MX",{day:"numeric",month:"short"})}</span>
+      </div>
+    </div>
+  `).join("") || `<p class="no-upcoming">Sin notas aún</p>`;
+}
+
+window.addNoteMobile = async () => {
+  const title = document.getElementById("note-title-m").value.trim();
+  const body = document.getElementById("note-body-m").value.trim();
+  if(!body) return;
+  const colors=["#D5E1FF","#E8D5FF","#D5FFED","#FFE8D5","#FFF3D5"];
+  const color=colors[Math.floor(Math.random()*colors.length)];
+  await addDoc(notesCol,{title:title||null,body,color,createdAt:new Date().toISOString()});
+  document.getElementById("note-title-m").value="";
+  document.getElementById("note-body-m").value="";
+};
+
+window.switchMobileKanban = (status, btn) => {
+  document.querySelectorAll('.mobile-kanban-subtab, .mobile-kanban-tab').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  document.querySelectorAll('.kanban-col-wrapper').forEach(w=>w.classList.remove('mobile-active'));
+  const wrapper = document.getElementById('wrapper-'+status);
+  if(wrapper) wrapper.classList.add('mobile-active');
+};
+
 window.toggleSidebar = () => {
   const sb = document.getElementById("sidebar");
   sb.classList.toggle("open");
@@ -902,7 +1029,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 
 .cal-upcoming-section{border-top:1px solid var(--border);padding-top:16px; margin-top:10px}
 .cal-upcoming-title{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin-bottom:8px}
-.upcoming-item{display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:6px;font-size:12px; transition:filter 0.2s;}
+.upcoming-item{display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:6px;font-size:12px;transition:filter 0.2s;margin-bottom:4px;}
 .upcoming-item:hover{filter: brightness(1.1);}
 .upcoming-date{font-family:var(--mono);font-size:10px;color:var(--ink);white-space:nowrap;min-width:40px; font-weight:700;}
 .upcoming-title{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
@@ -984,58 +1111,85 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   #sidebar.open { left: 0; }
   .sidebar-backdrop.open { display: block; }
 
-  /* Right panel: calendario + notas, altura compacta */
-  .right-panel {
+  /* Hide desktop right panel and kanban nav - replaced by mobile tabs */
+  .right-panel { display: none !important; }
+  .mobile-kanban-nav { display: none !important; }
+
+  /* Mobile master tabs */
+  .mobile-master-tabs {
     order: 2;
     flex-shrink: 0;
-    border-left: none;
+    display: flex !important;
     border-bottom: 1px solid var(--border);
-    height: 220px;
-    overflow-y: auto;
-    display: flex;
+    background: var(--surface);
+  }
+  .mobile-master-tab {
+    flex: 1;
+    padding: 10px 4px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink3);
+    border: none;
+    background: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .mobile-master-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Mobile panels */
+  .mobile-panel {
+    order: 3;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: none;
     flex-direction: column;
   }
-  .right-tabs { flex-shrink: 0; }
-  .right-tab-content.visible {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px;
-    gap: 8px;
-  }
+  .mobile-panel.active { display: flex; }
 
-  /* Cal compacto en móvil */
-  .cal-cell { min-height: 26px; }
+  /* Planeador panel */
+  #mpanel-cal {
+    overflow-y: auto;
+    padding: 14px;
+  }
+  .cal-cell { min-height: 28px; }
   .cal-upcoming-section { padding-top: 8px; margin-top: 6px; }
 
-  /* Tabs kanban móvil */
-  .mobile-kanban-nav {
-    order: 3;
-    display: flex !important;
+  /* Tareas panel */
+  #mpanel-tasks {
+    flex-direction: column;
+  }
+  .mobile-kanban-subnav {
+    flex-shrink: 0;
+    display: flex;
     gap: 6px;
     overflow-x: auto;
     padding: 8px 12px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
   }
-  .mobile-kanban-nav::-webkit-scrollbar { display: none; }
-  .mobile-kanban-tab {
-    padding: 6px 14px;
+  .mobile-kanban-subnav::-webkit-scrollbar { display: none; }
+  .mobile-kanban-subtab {
+    padding: 5px 12px;
     border-radius: 20px;
     border: 1px solid var(--border);
     background: var(--surface2);
     color: var(--ink2);
     white-space: nowrap;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;
   }
-  .mobile-kanban-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .mobile-kanban-subtab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-  /* Main: espacio restante */
+  /* Main dentro del panel tareas */
   .main {
-    order: 4;
+    order: unset;
     flex: 1;
     min-height: 0;
     padding: 0;
@@ -1043,8 +1197,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     flex-direction: column;
     overflow: hidden;
   }
-
-  /* Kanban wrap */
   .kanban-wrap {
     display: flex !important;
     flex: 1;
@@ -1056,6 +1208,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
   .kanban-col-wrapper.mobile-active { display: flex !important; }
   .col-title { display: none; }
   .kanban-col { flex: 1; overflow-y: auto; padding-bottom: 12px; }
+
+  /* Notas panel */
+  #mpanel-notes {
+    overflow-y: auto;
+    padding: 14px;
+    gap: 10px;
+  }
 
   /* Float bar: siempre al fondo */
   .float-bar {
@@ -1095,6 +1254,47 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 
     <button class="theme-btn" onclick="toggleTheme()" title="Cambiar Tema"><i class="fi fi-rr-moon-stars"></i></button>
   </header>
+
+  <!-- MOBILE MASTER TABS -->
+  <div class="mobile-master-tabs" style="display:none">
+    <button class="mobile-master-tab active" onclick="switchMasterTab('cal',this)">📅 Planeador</button>
+    <button class="mobile-master-tab" onclick="switchMasterTab('tasks',this)">✓ Tareas</button>
+    <button class="mobile-master-tab" onclick="switchMasterTab('notes',this)">📝 Notas</button>
+  </div>
+
+  <!-- MOBILE PANEL: PLANEADOR -->
+  <div class="mobile-panel" id="mpanel-cal" style="display:none">
+    <div class="cal-nav-row" style="padding:14px 14px 0">
+      <button class="cal-nav-btn" onclick="calPrev()">‹</button>
+      <span class="cal-month-label" id="cal-month-label-m"></span>
+      <button class="cal-nav-btn" onclick="calNext()">›</button>
+    </div>
+    <div id="cal-body-m" style="padding:0 14px"></div>
+    <div class="cal-upcoming-section" style="padding:8px 14px 14px">
+      <p class="cal-upcoming-title">Próximos deadlines</p>
+      <div id="cal-upcoming-m"></div>
+    </div>
+  </div>
+
+  <!-- MOBILE PANEL: TAREAS -->
+  <div class="mobile-panel" id="mpanel-tasks" style="display:none">
+    <div class="mobile-kanban-subnav">
+      <button class="mobile-kanban-subtab active" onclick="switchMobileKanban('todo',this)">Sin empezar</button>
+      <button class="mobile-kanban-subtab" onclick="switchMobileKanban('inprogress',this)">En progreso</button>
+      <button class="mobile-kanban-subtab" onclick="switchMobileKanban('waiting',this)">En espera</button>
+      <button class="mobile-kanban-subtab" onclick="switchMobileKanban('done',this)">Finalizado</button>
+    </div>
+  </div>
+
+  <!-- MOBILE PANEL: NOTAS -->
+  <div class="mobile-panel" id="mpanel-notes" style="display:none">
+    <div class="note-new">
+      <input type="text" id="note-title-m" placeholder="Título (opcional)">
+      <textarea id="note-body-m" rows="3" placeholder="Escribe una nota…"></textarea>
+      <button class="note-add-btn" onclick="addNoteMobile()">+ Agregar</button>
+    </div>
+    <div class="notes-grid" id="notes-grid-m"></div>
+  </div>
 
   <aside id="sidebar">
     <div class="sidebar-section">

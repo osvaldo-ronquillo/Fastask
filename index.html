@@ -445,7 +445,7 @@ function renderCalendar(){
   html+="</div>";
   document.getElementById("cal-body").innerHTML=html;
 
-  const upcoming=tasks.filter(t=>t.deadline && t.status!=="archived").sort((a,b)=>new Date(a.deadline)-new Date(b.deadline)).slice(0,10);
+  const upcoming=tasks.filter(t=>t.deadline && t.status!=="archived" && t.status!=="done").sort((a,b)=>new Date(a.deadline)-new Date(b.deadline)).slice(0,10);
   document.getElementById("cal-upcoming").innerHTML=upcoming.length
     ? upcoming.map(t=>{
         const d=new Date(t.deadline+"T12:00:00");
@@ -644,36 +644,31 @@ const isMobile = () => window.innerWidth <= 900;
 
 function initMobileTabs() {
   if(!isMobile()) return;
+  // Hide desktop-only elements
+  document.querySelector('.right-panel').style.display = 'none';
+  document.querySelector('.mobile-kanban-nav') && (document.querySelector('.mobile-kanban-nav').style.display = 'none');
+  // Show mobile tabs
   document.querySelector('.mobile-master-tabs').style.display = 'flex';
+  // Move main into tasks panel
+  const mainEl = document.querySelector('.main');
+  const tp = document.getElementById('mpanel-tasks');
+  if(tp && mainEl && !tp.contains(mainEl)) tp.appendChild(mainEl);
+  // Activate first tab
   switchMasterTab('cal', document.querySelector('.mobile-master-tab'));
 }
 
 window.switchMasterTab = (tab, btn) => {
-  // Update tab buttons
+  if(!isMobile()) return;
   document.querySelectorAll('.mobile-master-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-
-  // Hide all panels
-  document.querySelectorAll('.mobile-panel').forEach(p => {
-    p.classList.remove('active');
-    p.style.display = 'none';
-  });
-
-  // Hide/show main (tasks panel uses the real .main)
-  const mainEl = document.querySelector('.main');
-
+  document.querySelectorAll('.mobile-panel').forEach(p => { p.style.display = 'none'; });
   if(tab === 'tasks') {
-    document.getElementById('mpanel-tasks').classList.add('active');
     document.getElementById('mpanel-tasks').style.display = 'flex';
-    // Move main inside tasks panel if not already there
-    const tp = document.getElementById('mpanel-tasks');
-    if(!tp.contains(mainEl)) tp.appendChild(mainEl);
+    renderKanban();
   } else if(tab === 'cal') {
-    document.getElementById('mpanel-cal').classList.add('active');
     document.getElementById('mpanel-cal').style.display = 'flex';
     renderMobileCalendar();
   } else if(tab === 'notes') {
-    document.getElementById('mpanel-notes').classList.add('active');
     document.getElementById('mpanel-notes').style.display = 'flex';
     renderMobileNotes();
   }
@@ -712,7 +707,7 @@ function renderMobileCalendar() {
   const bodyEl = document.getElementById("cal-body-m");
   if(bodyEl) bodyEl.innerHTML = html;
 
-  const upcoming = tasks.filter(t=>t.deadline&&t.status!=="archived").sort((a,b)=>new Date(a.deadline)-new Date(b.deadline)).slice(0,8);
+  const upcoming = tasks.filter(t=>t.deadline&&t.status!=="archived"&&t.status!=="done").sort((a,b)=>new Date(a.deadline)-new Date(b.deadline)).slice(0,8);
   const upcomingEl = document.getElementById("cal-upcoming-m");
   if(upcomingEl) upcomingEl.innerHTML = upcoming.length
     ? upcoming.map(t=>{
@@ -862,8 +857,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .sidebar-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);margin-bottom:8px;padding-left:8px}
 .sidebar-row{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;margin-bottom:2px}
 
-.cat-item,.prio-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:background .15s,color .15s;border:none;background:none;color:var(--ink2);flex:1; font-family:var(--font)}
+.cat-item,.prio-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:background .15s,color .15s;border:none;background:none;color:var(--ink2);flex:1;font-family:var(--font)}
 .cat-item img { filter: brightness(0.6); transition: filter 0.15s; }
+.prio-item i { font-size: 15px; }
 .cat-item:hover,.prio-item:hover{background:var(--surface2);color:var(--ink)}
 .cat-item.active,.prio-item.active{background:var(--surface3);color:var(--ink)}
 .cat-item.active img { filter: brightness(1) invert(0); }
@@ -1137,7 +1133,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     border-bottom: 2px solid transparent;
     cursor: pointer;
     font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
   }
+  .mobile-master-tab i { font-size: 13px; }
   .mobile-master-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   /* Mobile panels */
@@ -1149,7 +1150,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     display: none;
     flex-direction: column;
   }
-  .mobile-panel.active { display: flex; }
 
   /* Planeador panel */
   #mpanel-cal {
@@ -1257,9 +1257,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 
   <!-- MOBILE MASTER TABS -->
   <div class="mobile-master-tabs" style="display:none">
-    <button class="mobile-master-tab active" onclick="switchMasterTab('cal',this)">📅 Planeador</button>
-    <button class="mobile-master-tab" onclick="switchMasterTab('tasks',this)">✓ Tareas</button>
-    <button class="mobile-master-tab" onclick="switchMasterTab('notes',this)">📝 Notas</button>
+    <button class="mobile-master-tab active" onclick="switchMasterTab('cal',this)"><i class="fi fi-rr-calendar-check"></i> Planeador</button>
+    <button class="mobile-master-tab" onclick="switchMasterTab('tasks',this)"><i class="fi fi-rr-list-check"></i> Tareas</button>
+    <button class="mobile-master-tab" onclick="switchMasterTab('notes',this)"><i class="fi fi-rr-pen-field"></i> Notas</button>
   </div>
 
   <!-- MOBILE PANEL: PLANEADOR -->
@@ -1307,9 +1307,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     
     <div class="sidebar-section">
       <p class="sidebar-label">Prioridad</p>
-      <div class="sidebar-row"><button class="prio-item" data-id="baja" onclick="setPriority('baja')"><span class="prio-dot" style="--pc:var(--prio-baja)"></span> Baja</button><input type="color" id="picker-prio-baja" class="sidebar-color-picker" value="#7B8EE8" onchange="changeColor('prio', 'baja', this.value)"></div>
-      <div class="sidebar-row"><button class="prio-item" data-id="media" onclick="setPriority('media')"><span class="prio-dot" style="--pc:var(--prio-media)"></span> Media</button><input type="color" id="picker-prio-media" class="sidebar-color-picker" value="#F24061" onchange="changeColor('prio', 'media', this.value)"></div>
-      <div class="sidebar-row"><button class="prio-item" data-id="alta" onclick="setPriority('alta')"><span class="prio-dot" style="--pc:var(--prio-alta)"></span> Alta</button><input type="color" id="picker-prio-alta" class="sidebar-color-picker" value="#471EC5" onchange="changeColor('prio', 'alta', this.value)"></div>
+      <div class="sidebar-row"><button class="prio-item" data-id="baja" onclick="setPriority('baja')"><i class="fi fi-rr-signal-alt"></i> Baja</button></div>
+      <div class="sidebar-row"><button class="prio-item" data-id="media" onclick="setPriority('media')"><i class="fi fi-rr-signal-alt-1"></i> Media</button></div>
+      <div class="sidebar-row"><button class="prio-item" data-id="alta" onclick="setPriority('alta')"><i class="fi fi-rr-signal-alt-2"></i> Alta</button></div>
     </div>
 
     <div class="sidebar-section" style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border);">
@@ -1321,8 +1321,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 
   <aside class="right-panel">
     <div class="right-tabs">
-      <button class="rtab active" onclick="switchTab('cal', this)">Planeador</button>
-      <button class="rtab" onclick="switchTab('notes', this)">Notas</button>
+      <button class="rtab active" onclick="switchTab('cal', this)"><i class="fi fi-rr-calendar-check"></i> Planeador</button>
+      <button class="rtab" onclick="switchTab('notes', this)"><i class="fi fi-rr-pen-field"></i> Notas</button>
     </div>
     <div class="right-tab-content visible" id="tab-cal">
       <div class="cal-nav-row">

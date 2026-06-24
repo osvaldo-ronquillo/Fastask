@@ -201,6 +201,9 @@ function taskCard(t){
         <div class="tc-menu-wrap tc-menu-wrap-always">
           <i class="fi fi-rr-angle-small-down tc-menu-trigger"></i>
           <div class="tc-dropdown">
+            <button onclick="openCategoryModal('${t.id}', '${t.category||""}')">
+              ${(()=>{ const cats={freelance:'<img src="https://img.icons8.com/forma-light/24/FFFFFF/ninja-head.png" width="12">',trabajo:'<img src="https://img.icons8.com/forma-light/24/FFFFFF/briefcase.png" width="12">',estudio:'<img src="https://img.icons8.com/forma-light/24/FFFFFF/student-male.png" width="12">',personal:'<img src="https://img.icons8.com/forma-light/24/FFFFFF/launched-rocket.png" width="12">'}; const labels={freelance:'Freelance',trabajo:'Trabajo',estudio:'Estudio',personal:'Personal'}; const cat=t.category; return cat ? `${cats[cat]||''} ${labels[cat]||cat}` : '<i class="fi fi-rr-apps-add"></i> Categoría'; })()}
+            </button>
             <button onclick="duplicateTask('${t.id}')"><i class="fi fi-rr-clone"></i> Duplicar</button>
             ${t.status === 'archived' 
               ? `<button onclick="updateTaskField('${t.id}', 'status', 'todo')"><i class="fi fi-rr-rotate-right"></i> Restaurar</button>`
@@ -752,6 +755,29 @@ window.switchMobileKanban = (status, btn) => {
   document.querySelectorAll('.kanban-col-wrapper').forEach(w=>w.classList.remove('mobile-active'));
   const wrapper = document.getElementById('wrapper-'+status);
   if(wrapper) wrapper.classList.add('mobile-active');
+};
+
+window.openCategoryModal = (id, currentCat) => {
+  const cats = [
+    { id:'freelance', label:'Freelance', icon:'https://img.icons8.com/forma-light/24/FFFFFF/ninja-head.png' },
+    { id:'trabajo',   label:'Trabajo',   icon:'https://img.icons8.com/forma-light/24/FFFFFF/briefcase.png' },
+    { id:'estudio',   label:'Estudio',   icon:'https://img.icons8.com/forma-light/24/FFFFFF/student-male.png' },
+    { id:'personal',  label:'Personal',  icon:'https://img.icons8.com/forma-light/24/FFFFFF/launched-rocket.png' },
+  ];
+  openModal(
+    `<h3 class="modal-title">Cambiar categoría</h3>
+     <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+       ${cats.map(cat => `
+         <button onclick="updateTaskField('${id}','category','${cat.id}');closeModal()" 
+           style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:${cat.id===currentCat?'var(--surface3)':'var(--surface2)'};color:var(--ink);cursor:pointer;font-family:var(--font);font-size:13px;font-weight:600;transition:background .15s;text-align:left">
+           <img src="${cat.icon}" width="18" height="18">
+           ${cat.label}
+           ${cat.id===currentCat ? '<i class="fi fi-rr-check" style="margin-left:auto;color:var(--accent)"></i>' : ''}
+         </button>
+       `).join('')}
+     </div>`,
+    null
+  );
 };
 
 window.toggleSidebar = () => {

@@ -660,6 +660,152 @@ window.handleMicOrSave=()=>{
     window.toggleMic();
   }
 };
+/* ---- Sincronizar bandeja (Studio -> Sheets -> Apps Script -> FasTask) ---- */
+const SYNC_KEY = "fastask_sync";
+const SYNC_CATS = ["freelance","trabajo","estudio","personal"];
+const getSyncCfg = () => { try { return JSON.parse(localStorage.getItem(SYNC_KEY) || "null"); } catch(e){ return null; } };
+const escHtml = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let syncBusy = false, syncPending = null;
+
+function setSyncBusy(on){
+  syncBusy = on;
+  const b = document.getElementById("sync-btn");
+  if(b) b.classList.toggle("spinning", on);
+}
+
+/* Cada fila de la hoja trae uno o mas pendientes, uno por linea: titulo || deadline || responsable || contexto */
+function parseBandeja(rows){
+  const out = [];
+  rows.forEach(r => {
+    String(r.titulo || "").split(/\r?\n/).forEach(line => {
+      const parts = line.split("||").map(x => x.trim());
+      if(!parts[0]) return;
+      const [titulo, dl, resp, ctx] = parts;
+      const cat = String(r.categoria || "").toLowerCase();
+      out.push({
+        row: r.row,
+        titulo,
+        deadline: /^\d{4}-\d{2}-\d{2}$/.test(dl || "") ? dl : null,
+        responsable: resp && !/^sin responsable$/i.test(resp) ? resp : null,
+        contexto: ctx || "",
+        categoria: SYNC_CATS.includes(cat) ? cat : "trabajo",
+        link: r.id_origen || null,
+        fecha: r.fecha || "",
+        key: `${r.id_origen || ("fila" + r.row)}#${titulo.toLowerCase()}`
+      });
+    });
+  });
+  return out;
+}
+
+async function syncCall(cfg, method, payload){
+  if(method === "GET"){
+    const res = await fetch(`${cfg.url}?action=list&token=${encodeURIComponent(cfg.token)}`);
+    return await res.json();
+  }
+  const res = await fetch(cfg.url, { method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"}, body: JSON.stringify({ token: cfg.token, ...payload }) });
+  return await res.json();
+}
+
+window.syncBandeja = async () => {
+  if(syncBusy) return;
+  const cfg = getSyncCfg();
+  if(!cfg || !cfg.url || !cfg.token){ window.openSyncConfig(); return; }
+  setSyncBusy(true);
+  showFeedback("Sincronizando…","processing");
+  try{
+    const data = await syncCall(cfg, "GET");
+    if(!data.ok) throw new Error(data.error || "Error de la bandeja");
+    if(!data.rows.length){ showFeedback("Bandeja al día","success"); return; }
+    const known = new Set(tasks.map(t => t.sourceKey).filter(Boolean));
+    const fresh = parseBandeja(data.rows).filter(i => !known.has(i.key));
+    const rowNums = data.rows.map(r => r.row);
+    if(!fresh.length){
+      await syncCall(cfg, "POST", { action:"mark", rows: rowNums });
+      showFeedback("Sin pendientes nuevos","success");
+      return;
+    }
+    syncPending = { rows: rowNums, items: fresh };
+    openSyncSheet();
+  }catch(e){
+    console.error(e);
+    showFeedback(String(e.message).includes("autorizado") ? "Clave incorrecta" : "No pude sincronizar","error");
+  }finally{
+    setSyncBusy(false);
+  }
+};
+
+function openSyncSheet(){
+  const items = syncPending.items;
+  const rows = items.map((it, i) => {
+    const meta = [it.deadline ? `<span class="sync-chip">${escHtml(it.deadline)}</span>` : `<span class="sync-chip muted">sin fecha</span>`,
+                  it.responsable ? `<span class="sync-chip muted">${escHtml(it.responsable)}</span>` : "",
+                  it.contexto ? `<span class="sync-ctx">${escHtml(it.contexto)}</span>` : ""].join("");
+    return `<label class="sync-item"><input type="checkbox" data-i="${i}" checked>
+      <span class="sync-body"><span class="sync-title">${escHtml(it.titulo)}</span><span class="sync-meta">${meta}</span></span></label>`;
+  }).join("");
+  openModal(`<h3 class="modal-title">Pendientes nuevos (${items.length})</h3>
+    <p class="sync-sub">Desmarca los que no quieras agregar al tablero.</p>
+    <div class="sync-list">${rows}</div>
+    <div class="modal-btns">
+      <button class="modal-btn" onclick="closeModal()">Después</button>
+      <button class="modal-btn primary" id="sync-confirm" onclick="confirmSync()">Agregar</button>
+    </div>`);
+}
+
+window.confirmSync = async () => {
+  if(!syncPending) return;
+  const btn = document.getElementById("sync-confirm");
+  if(btn) btn.disabled = true;
+  const cfg = getSyncCfg();
+  const picked = [...document.querySelectorAll(".sync-list input:checked")].map(el => syncPending.items[Number(el.dataset.i)]);
+  try{
+    for(const it of picked){
+      await addDoc(tasksCol, {
+        title: it.titulo, time: null, priority: "baja", category: it.categoria,
+        context: it.contexto || null, link: it.link, document: null,
+        deadline: it.deadline, status: "todo", done: false,
+        createdAt: new Date().toISOString(), source: "bandeja", sourceKey: it.key
+      });
+    }
+    // Se marcan como importadas todas las filas, incluidas las desmarcadas (descartadas).
+    await syncCall(cfg, "POST", { action:"mark", rows: syncPending.rows });
+    closeModal();
+    showFeedback(picked.length ? `✓ ${picked.length} tarea(s)` : "Descartadas","success");
+    syncPending = null;
+  }catch(e){
+    console.error(e);
+    if(btn) btn.disabled = false;
+    showFeedback("Error al guardar, reintenta","error");
+  }
+};
+
+window.openSyncConfig = () => {
+  const cfg = getSyncCfg() || {};
+  openModal(`<h3 class="modal-title">Conexión de bandeja</h3>
+    <p class="sync-sub">Datos del script de Apps Script. Se guardan solo en este dispositivo.</p>
+    <p class="modal-label">URL de la aplicación web (termina en /exec)</p>
+    <input class="modal-input" id="sync-url" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec" value="${escHtml(cfg.url || "")}">
+    <p class="modal-label">Clave (TOKEN)</p>
+    <input class="modal-input" id="sync-token" type="password" autocomplete="off" placeholder="Clave del script" value="${escHtml(cfg.token || "")}">
+    <div class="modal-btns">
+      <button class="modal-btn" onclick="closeModal()">Cancelar</button>
+      <button class="modal-btn primary" onclick="saveSyncConfig()">Guardar y sincronizar</button>
+    </div>`);
+};
+
+window.saveSyncConfig = () => {
+  const url = document.getElementById("sync-url").value.trim();
+  const token = document.getElementById("sync-token").value.trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^\s]+\/exec$/.test(url) || !token){
+    showFeedback("Revisa la URL y la clave","error");
+    return;
+  }
+  localStorage.setItem(SYNC_KEY, JSON.stringify({ url, token }));
+  closeModal();
+  window.syncBandeja();
+};
+
 /* ---- Menus de tarjeta por tap (touch no tiene hover) ---- */
 document.addEventListener("click", e=>{
   if(window.innerWidth > 900) return;
@@ -1123,6 +1269,24 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
 .modal-bullets { padding-left: 20px; font-size: 13px; color: var(--ink); line-height: 1.6; margin-bottom: 16px; }
 .modal-bullets li { margin-bottom: 4px; }
 
+/* === SINCRONIZAR BANDEJA === */
+.sync-btn{background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--ink2);transition:all .2s;margin-left:auto;display:flex;align-items:center}
+.sync-btn:hover{background:var(--surface2)}
+.sync-btn + .theme-btn{margin-left:0}
+.sync-btn.spinning i{animation:syncSpin .9s linear infinite}
+@keyframes syncSpin{to{transform:rotate(360deg)}}
+.sync-sub{font-size:12px;color:var(--ink2);margin:-8px 0 14px;line-height:1.4}
+.sync-list{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow-y:auto;margin-bottom:6px}
+.sync-item{display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:12px;background:var(--surface2);cursor:pointer}
+.sync-item input{width:20px;height:20px;margin-top:1px;accent-color:var(--accent);flex-shrink:0}
+.sync-body{display:flex;flex-direction:column;gap:6px;min-width:0}
+.sync-title{font-size:14px;font-weight:600;color:var(--ink);line-height:1.3}
+.sync-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sync-chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:100px;background:var(--accent);color:#fff}
+.sync-chip.muted{background:var(--surface3);color:var(--ink2)}
+.sync-ctx{font-size:11px;color:var(--ink3)}
+.modal-btn:disabled{opacity:.5;cursor:default}
+
 /* === MOBILE APP (PWA) ===
    Solo aplica en pantallas <= 900px. El escritorio no se toca.
    Marca: violeta #471EC5, azul #324CF3, azul #2E83F2, lila #C686D1, azul claro #D5E1FF */
@@ -1190,6 +1354,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     border-bottom: none;
   }
   .logo { height: 26px; }
+  .sync-btn { margin-left: 0 !important; }
   .badge {
     background: linear-gradient(135deg, #471EC5, #324CF3);
     font-size: 11px; padding: 3px 9px;
@@ -1200,7 +1365,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     background: var(--surface2); border-color: transparent;
   }
   .search-wrap input { font-size: 16px; } /* 16px evita el zoom de iOS al enfocar */
-  .mobile-btn, .theme-btn {
+  .mobile-btn, .theme-btn, .sync-btn {
     display: flex; align-items: center; justify-content: center;
     width: 40px; height: 40px; padding: 0; margin: 0; flex-shrink: 0;
     border-radius: 50%; border: none; background: var(--surface2); color: var(--ink2);
@@ -1404,6 +1569,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     </div>
 
     <button class="mobile-btn" onclick="toggleSidebar()" aria-label="Filtros"><i class="fi fi-rr-settings-sliders"></i></button>
+    <button class="sync-btn" id="sync-btn" onclick="syncBandeja()" title="Sincronizar bandeja" aria-label="Sincronizar bandeja"><i class="fi fi-rr-refresh"></i></button>
     <button class="theme-btn" onclick="toggleTheme()" title="Cambiar Tema"><i class="fi fi-rr-moon-stars"></i></button>
   </header>
 
@@ -1467,6 +1633,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);min-height:10
     <div class="sidebar-section" style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border);">
       <div class="sidebar-row">
         <button class="cat-item" id="btn-archive" onclick="toggleArchiveView()" style="justify-content: center; background: var(--surface2);"><i class="fi fi-rr-folder-download"></i> Ver Archivo</button>
+      </div>
+      <div class="sidebar-row" style="margin-top:6px">
+        <button class="cat-item" onclick="openSyncConfig()" style="justify-content: center; background: var(--surface2);"><i class="fi fi-rr-link-alt"></i> Conexión de bandeja</button>
       </div>
     </div>
   </aside>

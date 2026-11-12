@@ -1,0 +1,83 @@
+openapi: 3.0.3
+info:
+  title: FasTask Agent API
+  version: "1.0"
+  description: Lee y escribe tareas de FasTask. Fechas en formato AAAA-MM-DD.
+servers:
+  - url: https://REEMPLAZA-CON-TU-WORKER.workers.dev
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  schemas:
+    Task:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [todo, inprogress, waiting, done, archived] }
+        priority: { type: string, enum: [baja, media, alta] }
+        category: { type: string, enum: [freelance, trabajo, estudio, personal] }
+        deadline: { type: string, nullable: true, example: "2026-11-20" }
+        context: { type: string, nullable: true }
+        link: { type: string, nullable: true }
+paths:
+  /summary:
+    get:
+      operationId: getSummary
+      summary: Resumen del tablero. Vencidas, de hoy, proximas (3 dias) y estancadas.
+      responses: { "200": { description: ok } }
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: Lista tareas abiertas ordenadas por fecha limite.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [todo, inprogress, waiting, done, archived] } }
+        - { name: category, in: query, schema: { type: string, enum: [freelance, trabajo, estudio, personal] } }
+        - { name: due_before, in: query, schema: { type: string }, description: AAAA-MM-DD }
+        - { name: include_done, in: query, schema: { type: string, enum: ["1"] } }
+      responses: { "200": { description: ok } }
+    post:
+      operationId: createTask
+      summary: Crea una tarea. Si ya existe una abierta igual (titulo y fecha) devuelve duplicate true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, maxLength: 200 }
+                deadline: { type: string, nullable: true, example: "2026-11-20" }
+                category: { type: string, enum: [freelance, trabajo, estudio, personal], default: trabajo }
+                priority: { type: string, enum: [baja, media, alta], default: baja }
+                context: { type: string, maxLength: 1000 }
+                link: { type: string }
+      responses: { "201": { description: creada } }
+  /tasks/{id}:
+    patch:
+      operationId: updateTask
+      summary: Cambia campos de una tarea.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                context: { type: string }
+                deadline: { type: string, nullable: true }
+                priority: { type: string, enum: [baja, media, alta] }
+                category: { type: string, enum: [freelance, trabajo, estudio, personal] }
+                status: { type: string, enum: [todo, inprogress, waiting, done, archived] }
+      responses: { "200": { description: actualizada } }
+  /tasks/{id}/done:
+    post:
+      operationId: completeTask
+      summary: Marca la tarea como hecha.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: ok } }

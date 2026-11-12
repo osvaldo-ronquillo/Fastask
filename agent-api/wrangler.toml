@@ -1,0 +1,7 @@
+name = "fastask-agent-api"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# "0" = solo lectura. Cambia a "1" cuando quieras que el asistente escriba.
+WRITE_ENABLED = "0"
